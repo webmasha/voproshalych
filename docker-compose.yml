@@ -1,0 +1,70 @@
+services:
+  core:
+    build:
+      context: .
+      dockerfile: bot-service/core/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_CORE_APP_NAME: ${BOT_CORE_APP_NAME:-bot-core}
+      BOT_CORE_APP_VERSION: ${BOT_CORE_APP_VERSION:-0.1.0}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: bot-service/bots/telegram/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
+      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    depends_on:
+      core:
+        condition: service_healthy
+
+  vk-bot:
+    build:
+      context: .
+      dockerfile: bot-service/bots/vk/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
+      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
+      VK_BOT_TOKEN: ${VK_BOT_TOKEN}
+    depends_on:
+      core:
+        condition: service_healthy
+
+  max-bot:
+    build:
+      context: .
+      dockerfile: bot-service/bots/max/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
+      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN}
+    depends_on:
+      core:
+        condition: service_healthy

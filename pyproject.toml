@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voproshalych"
+version = "0.1.0"
+description = "Shared bot core and platform adapters."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+core = [
+    "fastapi==0.115.12",
+    "pydantic==2.10.6",
+    "uvicorn==0.34.0",
+]
+telegram = [
+    "aiogram==3.18.0",
+    "httpx==0.28.1",
+]
+vk = [
+    "httpx==0.28.1",
+    "vkbottle==4.6.2",
+]
+
+[tool.setuptools]
+py-modules = []
