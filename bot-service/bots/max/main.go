@@ -233,7 +233,7 @@ func buildIncomingMessage(update *schemes.MessageCreatedUpdate) (IncomingMessage
 	}
 
 	if message.Timestamp != 0 {
-		incoming.Timestamp = time.Unix(message.Timestamp, 0).UTC().Format(time.RFC3339)
+		incoming.Timestamp = formatUnixTimestamp(message.Timestamp)
 	}
 
 	incoming.MessageID = message.Body.Mid
@@ -271,4 +271,16 @@ func valueOrDefault(value string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// formatUnixTimestamp нормализует timestamp из MAX в RFC3339.
+func formatUnixTimestamp(timestamp int64) string {
+	switch {
+	case timestamp >= 1_000_000_000_000_000:
+		return time.UnixMicro(timestamp).UTC().Format(time.RFC3339)
+	case timestamp >= 1_000_000_000_000:
+		return time.UnixMilli(timestamp).UTC().Format(time.RFC3339)
+	default:
+		return time.Unix(timestamp, 0).UTC().Format(time.RFC3339)
+	}
 }
