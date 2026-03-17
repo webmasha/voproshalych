@@ -66,7 +66,7 @@ class GigaChatProvider(BaseLLMProvider):
             "scope": "GIGACHAT_API_PERS",
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             response = await client.post(
                 "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
                 headers=headers,
@@ -116,7 +116,7 @@ class GigaChatProvider(BaseLLMProvider):
             "n": 1,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
             response = await client.post(
                 "https://ngw.devices.sberbank.ru:9443/api/v2/chat/completions",
                 headers=headers,

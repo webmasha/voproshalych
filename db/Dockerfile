@@ -1,11 +1,14 @@
 FROM python:3.12-slim
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 WORKDIR /app
 
 COPY pyproject.toml ./
 
-RUN pip install uv && \
-    uv sync
+ENV UV_SYSTEM_PYTHON=1
+
+RUN uv sync
 
 COPY . .
 

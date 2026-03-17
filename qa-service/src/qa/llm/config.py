@@ -37,11 +37,12 @@ class LLMConfig(BaseSettings):
     """
 
     mistral_api_key: str = Field(default="")
+    mistral_model: str = Field(default="open-mistral-nemo")
     openrouter_api_key: str = Field(default="")
     gigachat_client_id: str = Field(default="")
     gigachat_client_secret: str = Field(default="")
 
-    model_priority: list[str] = Field(default=["mistral", "openrouter", "gigachat"])
+    model_priority: list[str] = Field(default=["openrouter", "gigachat", "mistral"])
 
     default_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     default_max_tokens: int = Field(default=2048, ge=1)

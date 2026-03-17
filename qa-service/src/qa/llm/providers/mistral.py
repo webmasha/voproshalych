@@ -15,15 +15,16 @@ class MistralProvider(BaseLLMProvider):
         model: Модель для использования
     """
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         """Инициализировать провайдер.
 
         Args:
             api_key: API ключ (опционально, берется из конфига)
+            model: Модель (опционально, берется из конфига)
         """
         config = get_llm_config()
         self._api_key = api_key or config.mistral_api_key
-        self._model = "open-mistral-nemo"
+        self._model = model or config.mistral_model
 
     @property
     def name(self) -> str:

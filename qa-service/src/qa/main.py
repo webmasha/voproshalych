@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .api import qa_router, health_router
+from .api import qa_router, health_router, kb_router
 from .llm import get_llm_pool
 
 logging.basicConfig(
@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(qa_router)
+    app.include_router(kb_router)
 
     return app
 
