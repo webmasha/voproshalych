@@ -69,6 +69,28 @@ class CoreClient:
         response.raise_for_status()
         return response.json()
 
+    async def process_callback(self, callback: CallbackQuery) -> dict[str, Any]:
+        """Отправляет callback Telegram в core-сервис.
+
+        Args:
+            callback: Callback-событие Telegram.
+
+        Returns:
+            dict[str, Any]: JSON-ответ от core-сервиса.
+        """
+
+        payload = {
+            "platform": "telegram",
+            "user_id": str(callback.from_user.id),
+            "chat_id": str(callback.message.chat.id) if callback.message else "",
+            "callback_data": callback.data or "",
+            "message_id": str(callback.message.message_id) if callback.message else None,
+            "metadata": {},
+        }
+        response = await self._client.post("/callbacks", json=payload)
+        response.raise_for_status()
+        return response.json()
+
     def _build_payload(self, message: Message) -> dict[str, Any]:
         """Преобразует сообщение Telegram в общий контракт core.
 
@@ -153,6 +175,22 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
         Args:
             callback: Callback-событие Telegram.
         """
+        try:
+            bot_response = await core_client.process_callback(callback)
+        except httpx.HTTPError:
+            logging.exception("Failed to process Telegram callback via core")
+            await callback.answer("Сервис временно недоступен.")
+            return
+
+        for action in bot_response.get("actions", []):
+            if action.get("buttons") and callback.message:
+                await callback.message.edit_reply_markup(
+                    reply_markup=build_inline_keyboard(action["buttons"])
+                )
+
+            if action.get("text"):
+                await callback.answer(action["text"])
+                return
 
         await callback.answer()
 

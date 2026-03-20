@@ -14,6 +14,8 @@ core = [
     "fastapi==0.115.12",
     "httpx==0.28.1",
     "pydantic==2.10.6",
+    "psycopg2-binary>=2.9.0",
+    "sqlalchemy>=2.0.0",
     "uvicorn==0.34.0",
 ]
 telegram = [
