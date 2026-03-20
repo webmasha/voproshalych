@@ -63,7 +63,7 @@ services:
       retries: 5
       start_period: 10s
 
-  core:
+  bot-core:
     build:
       context: .
       dockerfile: bot-service/core/Dockerfile
@@ -96,11 +96,11 @@ services:
     env_file:
       - .env
     environment:
-      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
       BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     depends_on:
-      core:
+      bot-core:
         condition: service_healthy
 
   vk-bot:
@@ -111,11 +111,11 @@ services:
     env_file:
       - .env
     environment:
-      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
       BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       VK_BOT_TOKEN: ${VK_BOT_TOKEN}
     depends_on:
-      core:
+      bot-core:
         condition: service_healthy
 
   max-bot:
@@ -126,11 +126,11 @@ services:
     env_file:
       - .env
     environment:
-      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
       BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       MAX_BOT_TOKEN: ${MAX_BOT_TOKEN}
     depends_on:
-      core:
+      bot-core:
         condition: service_healthy
 
 volumes:

@@ -193,7 +193,7 @@ POSTGRES_PASSWORD=voproshalych
 
 ```mermaid
 graph LR
-    User[Пользователь] -->|"POST /messages"| Core[core:8000]
+    User[Пользователь] -->|"POST /messages"| Core[bot-core:8000]
     Core -->|"POST /qa"| QA[qa.py<br/>ask_question]
     QA --> Pool[llm_pool<br/>select_model]
     Pool -->|"fallback"| Call[llm_pool<br/>call]

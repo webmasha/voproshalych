@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 
 logging.basicConfig(level=logging.INFO)
@@ -87,6 +87,7 @@ class CoreClient:
 
         return {
             "platform": "telegram",
+            "message_type": detect_message_type(message),
             "user_id": str(message.from_user.id),
             "chat_id": str(message.chat.id),
             "text": message.text or "",
@@ -113,30 +114,137 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
     dispatcher = Dispatcher()
 
-    @dispatcher.message(Command("start", "ping"))
-    @dispatcher.message(F.text)
-    async def handle_text_message(message: Message) -> None:
-        """Проксирует текстовые сообщения в core-сервис и выполняет действия.
+    @dispatcher.message()
+    async def handle_message(message: Message) -> None:
+        """Проксирует сообщения в core-сервис и выполняет действия.
 
         Args:
             message: Сообщение Telegram, полученное через aiogram.
         """
 
-        if not message.text or not message.from_user:
+        if not message.from_user:
             return
+
+        pending_message: Message | None = None
+        if should_show_pending_message(message):
+            pending_message = await message.answer("Скоро будет получен ответ...")
 
         try:
             bot_response = await core_client.process_message(message)
         except httpx.HTTPError:
             logging.exception("Failed to process Telegram message via core")
+            await delete_message_safely(pending_message)
             await message.answer("Сервис временно недоступен.")
             return
 
+        await delete_message_safely(pending_message)
+
         for action in bot_response.get("actions", []):
             if action.get("type") == "send_text" and action.get("text"):
-                await message.answer(action["text"])
+                await message.answer(
+                    action["text"],
+                    reply_markup=build_inline_keyboard(action.get("buttons", [])),
+                )
+
+    @dispatcher.callback_query()
+    async def handle_callback(callback: CallbackQuery) -> None:
+        """Подтверждает callback без выполнения действий.
+
+        Args:
+            callback: Callback-событие Telegram.
+        """
+
+        await callback.answer()
 
     return dispatcher
+
+
+def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> InlineKeyboardMarkup | None:
+    """Преобразует кнопки из ответа core в Telegram inline keyboard.
+
+    Args:
+        button_rows: Строки кнопок из ответа core.
+
+    Returns:
+        InlineKeyboardMarkup | None: Готовая клавиатура или `None`.
+    """
+
+    if not button_rows:
+        return None
+
+    inline_keyboard = []
+    for row in button_rows:
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=button["text"],
+                    callback_data=button["callback_data"],
+                )
+                for button in row
+            ]
+        )
+
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
+def detect_message_type(message: Message) -> str:
+    """Определяет платформенно-независимый тип сообщения Telegram.
+
+    Args:
+        message: Сообщение Telegram.
+
+    Returns:
+        str: Тип сообщения для контракта core.
+    """
+
+    if message.voice:
+        return "voice"
+    if message.sticker:
+        return "sticker"
+    if message.photo:
+        return "photo"
+    if message.video:
+        return "video"
+    if message.audio:
+        return "audio"
+    if message.document:
+        return "document"
+    if message.text:
+        return "text"
+    return "unknown"
+
+
+def should_show_pending_message(message: Message) -> bool:
+    """Определяет, нужно ли показывать временное сообщение ожидания.
+
+    Args:
+        message: Сообщение Telegram.
+
+    Returns:
+        bool: `True`, если нужно показать сообщение ожидания.
+    """
+
+    if detect_message_type(message) != "text":
+        return False
+
+    normalized_text = (message.text or "").strip().lower()
+    return normalized_text not in {"/start", "/ping"}
+
+
+async def delete_message_safely(message: Message | None) -> None:
+    """Пытается удалить сообщение без проброса исключения наружу.
+
+    Args:
+        message: Сообщение, которое нужно удалить.
+    """
+
+    if message is None:
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        logging.exception("Failed to delete pending Telegram message")
 
 
 async def main() -> None:

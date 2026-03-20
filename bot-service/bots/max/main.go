@@ -28,25 +28,33 @@ type Settings struct {
 
 // IncomingMessage описывает JSON-контракт входящего сообщения для core.
 type IncomingMessage struct {
-	Platform  string         `json:"platform"`
-	UserID    string         `json:"user_id"`
-	ChatID    string         `json:"chat_id"`
-	Text      string         `json:"text"`
-	MessageID string         `json:"message_id,omitempty"`
-	Timestamp string         `json:"timestamp,omitempty"`
-	Metadata  map[string]any `json:"metadata"`
+	Platform    string         `json:"platform"`
+	MessageType string         `json:"message_type"`
+	UserID      string         `json:"user_id"`
+	ChatID      string         `json:"chat_id"`
+	Text        string         `json:"text"`
+	MessageID   string         `json:"message_id,omitempty"`
+	Timestamp   string         `json:"timestamp,omitempty"`
+	Metadata    map[string]any `json:"metadata"`
 }
 
 // OutgoingAction описывает действие, которое должен выполнить адаптер.
 type OutgoingAction struct {
-	Type     string         `json:"type"`
-	Text     string         `json:"text,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	Buttons  [][]InlineButton `json:"buttons,omitempty"`
+	Metadata map[string]any   `json:"metadata,omitempty"`
 }
 
 // BotResponse описывает ответ core-сервиса.
 type BotResponse struct {
 	Actions []OutgoingAction `json:"actions"`
+}
+
+// InlineButton описывает inline-кнопку из ответа core.
+type InlineButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
 }
 
 // CoreClient отправляет нормализованные сообщения в общий core.
@@ -155,13 +163,12 @@ func handleUpdate(
 	coreClient *CoreClient,
 	update any,
 ) error {
-	messageUpdate, ok := update.(*schemes.MessageCreatedUpdate)
-	if !ok {
+	if _, ok := update.(*schemes.MessageCallbackUpdate); ok {
 		return nil
 	}
 
-	text := messageUpdate.Message.Body.Text
-	if text == "" {
+	messageUpdate, ok := update.(*schemes.MessageCreatedUpdate)
+	if !ok {
 		return nil
 	}
 
@@ -185,6 +192,7 @@ func handleUpdate(
 
 		message := maxbot.NewMessage()
 		message.SetText(action.Text)
+		addKeyboardToMessage(message, action.Buttons)
 
 		switch {
 		case messageUpdate.Message.Recipient.ChatId != 0:
@@ -225,11 +233,12 @@ func buildIncomingMessage(update *schemes.MessageCreatedUpdate) (IncomingMessage
 	}
 
 	incoming := IncomingMessage{
-		Platform: "max",
-		UserID:   userID,
-		ChatID:   chatID,
-		Text:     message.Body.Text,
-		Metadata: map[string]any{},
+		Platform:    "max",
+		MessageType: detectMessageType(message),
+		UserID:      userID,
+		ChatID:      chatID,
+		Text:        message.Body.Text,
+		Metadata:    map[string]any{},
 	}
 
 	if message.Timestamp != 0 {
@@ -282,5 +291,50 @@ func formatUnixTimestamp(timestamp int64) string {
 		return time.UnixMilli(timestamp).UTC().Format(time.RFC3339)
 	default:
 		return time.Unix(timestamp, 0).UTC().Format(time.RFC3339)
+	}
+}
+
+// detectMessageType определяет платформенно-независимый тип сообщения MAX.
+func detectMessageType(message schemes.Message) string {
+	if message.Body.Text != "" {
+		return "text"
+	}
+	return "unknown"
+}
+
+// addKeyboardToMessage добавляет inline-кнопки к сообщению MAX.
+func addKeyboardToMessage(message *maxbot.Message, rows [][]InlineButton) {
+	if len(rows) == 0 {
+		return
+	}
+
+	keyboard := &maxbot.Keyboard{}
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+
+		keyboardRow := keyboard.AddRow()
+		for _, button := range row {
+			keyboardRow.AddCallback(
+				button.Text,
+				detectButtonIntent(button.CallbackData),
+				button.CallbackData,
+			)
+		}
+	}
+
+	message.AddKeyboard(keyboard)
+}
+
+// detectButtonIntent подбирает визуальный intent для inline-кнопки.
+func detectButtonIntent(callbackData string) schemes.Intent {
+	switch callbackData {
+	case "feedback:like":
+		return schemes.POSITIVE
+	case "feedback:dislike":
+		return schemes.NEGATIVE
+	default:
+		return schemes.DEFAULT
 	}
 }

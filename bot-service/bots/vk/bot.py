@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from vkbottle import Callback, GroupEventType, GroupTypes, Keyboard
 from vkbottle.bot import Bot, Message
 
 
@@ -82,6 +84,7 @@ class CoreClient:
 
         return {
             "platform": "vk",
+            "message_type": detect_message_type(message),
             "user_id": str(message.from_id),
             "chat_id": str(message.peer_id),
             "text": message.text or "",
@@ -111,28 +114,165 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
     bot = Bot(settings.vk_bot_token)
 
     @bot.on.message()
-    async def handle_text_message(message: Message) -> None:
-        """Проксирует текстовые сообщения в core-сервис и выполняет действия.
+    async def handle_message(message: Message) -> None:
+        """Проксирует сообщения в core-сервис и выполняет действия.
 
         Args:
             message: Сообщение VK, полученное через vkbottle.
         """
 
-        if not message.text:
-            return
+        pending_message_id: int | None = None
+        if should_show_pending_message(message):
+            pending_message_id = await send_pending_message(bot, message)
 
         try:
             bot_response = await core_client.process_message(message)
         except httpx.HTTPError:
             logging.exception("Не удалось обработать сообщение VK через core")
+            await delete_pending_message(bot, pending_message_id)
             await message.answer("Сервис временно недоступен.")
             return
 
+        await delete_pending_message(bot, pending_message_id)
+
         for action in bot_response.get("actions", []):
             if action.get("type") == "send_text" and action.get("text"):
-                await message.answer(action["text"])
+                await message.answer(
+                    action["text"],
+                    keyboard=build_inline_keyboard(action.get("buttons", [])),
+                )
+
+    @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=GroupTypes.MessageEvent)
+    async def handle_callback(event: GroupTypes.MessageEvent) -> None:
+        """Подтверждает callback inline-кнопок без бизнес-действий.
+
+        Args:
+            event: Callback-событие VK.
+        """
+
+        await bot.api.messages.send_message_event_answer(
+            event_id=event.event_id,
+            user_id=event.user_id,
+            peer_id=event.peer_id,
+        )
 
     return bot
+
+
+def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:
+    """Преобразует кнопки из ответа core в VK inline keyboard.
+
+    Args:
+        button_rows: Строки кнопок из ответа core.
+
+    Returns:
+        str | None: JSON-представление клавиатуры или `None`.
+    """
+
+    if not button_rows:
+        return None
+
+    keyboard = Keyboard(inline=True)
+    for row_index, row in enumerate(button_rows):
+        if row_index > 0:
+            keyboard.row()
+
+        for button in row:
+            keyboard.add(
+                Callback(button["text"], payload={"command": button["callback_data"]})
+            )
+
+    return keyboard.get_json()
+
+
+def detect_message_type(message: Message) -> str:
+    """Определяет платформенно-независимый тип сообщения VK.
+
+    Args:
+        message: Сообщение VK.
+
+    Returns:
+        str: Тип сообщения для контракта core.
+    """
+
+    if message.attachments:
+        attachment_type = getattr(message.attachments[0], "type", None)
+        if attachment_type in {
+            "sticker",
+            "photo",
+            "video",
+            "audio",
+            "doc",
+            "audio_message",
+        }:
+            if attachment_type == "audio_message":
+                return "voice"
+            if attachment_type == "doc":
+                return "document"
+            return attachment_type
+
+    if message.text:
+        return "text"
+    return "unknown"
+
+
+def should_show_pending_message(message: Message) -> bool:
+    """Определяет, нужно ли показывать временное сообщение ожидания.
+
+    Args:
+        message: Сообщение VK.
+
+    Returns:
+        bool: `True`, если нужно показать сообщение ожидания.
+    """
+
+    if detect_message_type(message) != "text":
+        return False
+
+    normalized_text = (message.text or "").strip().lower()
+    return normalized_text not in {"/start", "/ping"}
+
+
+async def send_pending_message(bot: Bot, message: Message) -> int | None:
+    """Отправляет временное сообщение ожидания.
+
+    Args:
+        bot: Экземпляр VK-бота.
+        message: Входящее сообщение.
+
+    Returns:
+        int | None: Идентификатор отправленного сообщения.
+    """
+
+    try:
+        return await bot.api.messages.send(
+            peer_id=message.peer_id,
+            random_id=random.randint(1, 2_147_483_647),
+            message="Скоро будет получен ответ...",
+        )
+    except Exception:
+        logging.exception("Не удалось отправить временное сообщение VK")
+        return None
+
+
+async def delete_pending_message(bot: Bot, message_id: int | None) -> None:
+    """Удаляет временное сообщение ожидания.
+
+    Args:
+        bot: Экземпляр VK-бота.
+        message_id: Идентификатор сообщения.
+    """
+
+    if message_id is None:
+        return
+
+    try:
+        await bot.api.messages.delete(
+            message_ids=[message_id],
+            delete_for_all=1,
+        )
+    except Exception:
+        logging.exception("Не удалось удалить временное сообщение VK")
 
 
 def main() -> None:
