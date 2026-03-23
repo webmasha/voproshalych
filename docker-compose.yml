@@ -39,7 +39,7 @@ services:
       - .env
     environment:
       QA_SERVICE_URL: ${QA_SERVICE_URL:-http://qa-service:8004}
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
       POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
@@ -62,11 +62,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    volumes:
-      - hf_cache:/root/.cache/huggingface
-      - ./qa-service/test_logs:/app/test_logs
 
-  core:
+  bot-core:
     build:
       context: .
       dockerfile: bot-service/core/Dockerfile
@@ -76,7 +73,10 @@ services:
     environment:
       BOT_CORE_APP_NAME: ${BOT_CORE_APP_NAME:-bot-core}
       BOT_CORE_APP_VERSION: ${BOT_CORE_APP_VERSION:-0.1.0}
-      QA_SERVICE_URL: ${QA_SERVICE_URL:-http://qa-service:8004}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
+      POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
     ports:
       - "8000:8000"
     healthcheck:
@@ -91,6 +91,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   telegram-bot:
     build:
@@ -100,11 +105,11 @@ services:
     env_file:
       - .env
     environment:
-      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
-      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-60}
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
+      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     depends_on:
-      core:
+      bot-core:
         condition: service_healthy
 
   vk-bot:
@@ -115,11 +120,11 @@ services:
     env_file:
       - .env
     environment:
-      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
-      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-60}
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
+      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       VK_BOT_TOKEN: ${VK_BOT_TOKEN}
     depends_on:
-      core:
+      bot-core:
         condition: service_healthy
 
   max-bot:
@@ -130,13 +135,12 @@ services:
     env_file:
       - .env
     environment:
-      BOT_CORE_URL: ${BOT_CORE_URL:-http://core:8000}
-      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-60}
+      BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
+      BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       MAX_BOT_TOKEN: ${MAX_BOT_TOKEN}
     depends_on:
-      core:
+      bot-core:
         condition: service_healthy
 
 volumes:
   postgres_data:
-  hf_cache:

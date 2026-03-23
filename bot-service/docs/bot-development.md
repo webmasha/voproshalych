@@ -10,8 +10,8 @@
 .
 ├── .env
 ├── docker-compose.yml
-├── pyproject.toml
 └── bot-service
+    ├── pyproject.toml
     ├── core
     │   ├── config.py
     │   ├── main.py
@@ -225,7 +225,7 @@ curl -X POST http://localhost:8000/messages \
 
 Python-зависимости описаны в:
 
-- `pyproject.toml`
+- `bot-service/pyproject.toml`
 
 Они разделены по группам:
 

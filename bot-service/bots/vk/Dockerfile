@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml /tmp/pyproject.toml
+COPY bot-service/pyproject.toml /tmp/pyproject.toml
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir --no-build-isolation "/tmp[vk]"
 
