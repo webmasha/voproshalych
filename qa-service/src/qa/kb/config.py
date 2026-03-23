@@ -27,7 +27,7 @@ class KBConfig(BaseSettings):
     embedding_model: str = "deepvk/USER-bge-m3"
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    min_chunk_size: int = 100
+    min_chunk_size: int = 0
 
     model_config = SettingsConfigDict(
         env_prefix="",

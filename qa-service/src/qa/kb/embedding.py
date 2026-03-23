@@ -1,4 +1,4 @@
-"""Embedding generation using sentence-transformers."""
+"""Генерация эмбеддингов с помощью sentence-transformers."""
 
 import logging
 from typing import Optional
@@ -14,10 +14,10 @@ _model: Optional[SentenceTransformer] = None
 
 
 def get_embedding_model() -> SentenceTransformer:
-    """Get or create the embedding model.
+    """Получить или создать модель эмбеддингов.
 
     Returns:
-        SentenceTransformer model
+        Модель SentenceTransformer
     """
     global _model
     if _model is None:
@@ -29,13 +29,13 @@ def get_embedding_model() -> SentenceTransformer:
 
 
 def get_embedding(text: str) -> list[float]:
-    """Generate embedding for a text.
+    """Сгенерировать эмбеддинг для текста.
 
     Args:
-        text: Text to embed
+        text: Текст для эмбеддинга
 
     Returns:
-        Embedding vector as list of floats
+        Вектор эмбеддинга как список float
     """
     model = get_embedding_model()
     embedding = model.encode(text, normalize_embeddings=True)
@@ -43,24 +43,24 @@ def get_embedding(text: str) -> list[float]:
 
 
 def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Generate embeddings for multiple texts.
+    """Сгенерировать эмбеддинги для нескольких текстов.
 
     Args:
-        texts: List of texts to embed
+        texts: Список текстов для эмбеддингов
 
     Returns:
-        List of embedding vectors
+        Список векторов эмбеддингов
     """
     model = get_embedding_model()
-    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
     return embeddings.tolist()
 
 
 def get_embedding_dimension() -> int:
-    """Get the dimension of the embedding vector.
+    """Получить размерность вектора эмбеддинга.
 
     Returns:
-        Embedding dimension
+        Размерность эмбеддинга
     """
     model = get_embedding_model()
     return model.get_sentence_embedding_dimension()

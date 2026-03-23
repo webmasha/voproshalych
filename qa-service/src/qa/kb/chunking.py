@@ -1,4 +1,4 @@
-"""Text chunking for Knowledge Base."""
+"""Разбиение текста на чанки для Базы Знаний."""
 
 import logging
 import re
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Chunk:
-    """A text chunk from a document."""
+    """Чанк текста из документа."""
 
     text: str
     source_url: str
@@ -19,7 +19,7 @@ class Chunk:
 
 
 class TextChunker:
-    """Split text into overlapping chunks."""
+    """Разбиение текста на перекрывающиеся чанки."""
 
     def __init__(
         self,
@@ -27,12 +27,12 @@ class TextChunker:
         chunk_overlap: int = 200,
         min_chunk_size: int = 100,
     ):
-        """Initialize the chunker.
+        """Инициализировать чанкер.
 
         Args:
-            chunk_size: Maximum size of each chunk in characters
-            chunk_overlap: Overlap between chunks in characters
-            min_chunk_size: Minimum chunk size to keep
+            chunk_size: Максимальный размер чанка в символах
+            chunk_overlap: Перекрытие между чанками в символах
+            min_chunk_size: Минимальный размер чанка для сохранения
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -44,15 +44,15 @@ class TextChunker:
         source_url: str,
         title: str = "",
     ) -> Generator[Chunk, None, None]:
-        """Split text into overlapping chunks.
+        """Разбить текст на перекрывающиеся чанки.
 
         Args:
-            text: Text to split
-            source_url: URL of the source document
-            title: Title of the document
+            text: Текст для разбиения
+            source_url: URL источника документа
+            title: Название документа
 
         Yields:
-            Chunk objects
+            Объекты Chunk
         """
         text = text.strip()
         if not text:
@@ -97,13 +97,13 @@ class TextChunker:
         logger.info(f"Created {len(chunks)} chunks from {source_url}")
 
     def _split_into_paragraphs(self, text: str) -> list[str]:
-        """Split text into paragraphs.
+        """Разбить текст на абзацы.
 
         Args:
-            text: Text to split
+            text: Текст для разбиения
 
         Returns:
-            List of paragraphs
+            Список абзацев
         """
         text = re.sub(r"\n{3,}", "\n\n", text)
         paragraphs = text.split("\n\n")
