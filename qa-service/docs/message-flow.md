@@ -2,20 +2,6 @@
 
 Этот документ описывает, как запрос проходит через QA-сервис от получения вопроса до ответа пользователю.
 
-## Общая схема
-
-```mermaid
-graph LR
-    User[Пользователь] --> Core[core<br/>dialog_service]
-    Core -->|"POST /qa"| QA[QA-сервис]
-    QA --> LLM[LLM Pool]
-    LLM --> Mistral[Mistral]
-    LLM --> OpenRouter[OpenRouter]
-    LLM --> GigaChat[GigaChat]
-    QA --> KB[Knowledge Base<br/>Этап 2+]
-    KB --> PG[(PostgreSQL<br/>chunks<br/>embeddings)]
-```
-
 ## API Endpoints
 
 ### POST /qa

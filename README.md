@@ -136,9 +136,11 @@ GIGACHAT_CLIENT_SECRET=your_secret
 
 ## Документация
 
-- QA Service — Путь запроса: qa-service/docs/message-flow.md
-- QA Service — Тестирование: qa-service/docs/testing.md
-- Bot Service — Разработка ботов: bot-service/docs/bot-development.md
+- docs/pipeline-user-query.md — Пайплайн обработки запроса пользователя
+- qa-service/docs/KB_FILL_GUIDE.md — Заполнение базы знаний
+- qa-service/docs/testing.md — Тестирование и запуск
+- qa-service/docs/message-flow.md — Путь запроса через систему
+- bot-service/docs/bot-development.md — Разработка ботов
 
 ## Технологический стек
 
@@ -172,16 +174,26 @@ GIGACHAT_CLIENT_SECRET=your_secret
 
 ### Этап 2: Knowledge Base
 
-- [ ] Document Downloader (парсинг сайтов)
-- [ ] Chunking (разбиение на чанки)
-- [ ] Embeddings (векторные представления)
-- [ ] Vector Search (семантический поиск)
+- [x] Document Downloader (парсинг сайтов)
+- [x] Chunking (разбиение на чанки)
+- [x] Embeddings (векторные представления)
+- [x] Vector Search (семантический поиск)
+- [x] Заполнение БЗ (~315 чанков)
 
 ### Этап 3: Agent
 
 - [ ] ReAct Agent на LangGraph
 - [ ] Tools: Confluence, Web Scraper
 - [ ] Agent Cache
+
+### Этап 4: Light RAG
+
+- [ ] Knowledge Graph (entities + relations)
+- [ ] NER для извлечения сущностей
+- [ ] Graph-based поиск
+- [ ] Hybrid Search (векторный + графовый)
+- [ ] Re-ranking
+- [ ] Redis кэширование
 
 ## Лицензия
 
