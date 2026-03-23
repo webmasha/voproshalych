@@ -1,18 +1,25 @@
-"""Web page and PDF parser."""
+"""Парсер веб-страниц и PDF."""
 
 import logging
+import re
 from dataclasses import dataclass
+from io import BytesIO
 
 import httpx
+import pdfplumber
+import pytesseract
 from bs4 import BeautifulSoup
-from pypdf import PdfReader
+from PIL import Image
+
+from .ocr_cache import get_ocr_config, get_tesseract_version
+
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ParsedDocument:
-    """Parsed document data."""
+    """Данные распарсенного документа."""
 
     url: str
     title: str
@@ -20,26 +27,26 @@ class ParsedDocument:
 
 
 class WebPageParser:
-    """Parser for extracting content from web pages and PDFs."""
+    """Парсер для извлечения контента с веб-страниц и PDF."""
 
     async def parse(self, url: str) -> ParsedDocument:
-        """Parse a web page or PDF and extract content.
+        """Распарсить веб-страницу или PDF и извлечь контент.
 
         Args:
-            url: URL of the page or PDF to parse
+            url: URL страницы или PDF для парсинга
 
         Returns:
-            ParsedDocument with extracted content
+            ParsedDocument с извлечённым контентом
 
         Raises:
-            httpx.HTTPStatusError: If the request fails
+            httpx.HTTPStatusError: Если запрос неуспешен
         """
         if url.lower().endswith(".pdf"):
             return await self._parse_pdf(url)
         return await self._parse_html(url)
 
     async def _parse_html(self, url: str) -> ParsedDocument:
-        """Parse an HTML page."""
+        """Распарсить HTML-страницу."""
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0; +https://voproshalych.ru)",
         }
@@ -64,7 +71,7 @@ class WebPageParser:
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
         text_content = "\n".join(chunk for chunk in chunks if chunk)
 
-        logger.info(f"Parsed HTML from {url}: title='{title[:50]}...'")
+        logger.info(f"Распарсен HTML с {url}: title='{title[:50]}...'")
 
         return ParsedDocument(
             url=url,
@@ -73,7 +80,10 @@ class WebPageParser:
         )
 
     async def _parse_pdf(self, url: str) -> ParsedDocument:
-        """Parse a PDF file."""
+        """Распарсить PDF-файл.
+
+        Всегда использует Tesseract OCR для извлечения текста из любого PDF.
+        """
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0; +https://voproshalych.ru)",
         }
@@ -82,29 +92,91 @@ class WebPageParser:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
 
-        from io import BytesIO
+        pdf_bytes = BytesIO(response.content)
 
-        pdf_file = BytesIO(response.content)
-        reader = PdfReader(pdf_file)
+        text_content = await self._extract_text_ocr(pdf_bytes)
 
-        title = ""
-        if reader.metadata and reader.metadata.get("/Title"):
-            title = reader.metadata.get("/Title")
+        text_content = self._clean_text(text_content)
 
-        text_content = ""
-        for page_num, page in enumerate(reader.pages):
-            page_text = page.extract_text()
-            if page_text:
-                text_content += page_text + "\n\n"
+        title = self._extract_title_from_url(url)
 
-        text_content = text_content.strip()
-
-        logger.info(
-            f"Parsed PDF from {url}: title='{title}', pages={len(reader.pages)}"
-        )
+        logger.info(f"Распарсен PDF с {url}: title='{title}'")
 
         return ParsedDocument(
             url=url,
-            title=title or url.split("/")[-1],
+            title=title,
             text_content=text_content,
         )
+
+    async def _extract_text_ocr(self, pdf_bytes: BytesIO) -> str:
+        """Извлечь текст из PDF с помощью Tesseract OCR.
+
+        Args:
+            pdf_bytes: PDF файл в памяти
+
+        Returns:
+            Текст из PDF
+        """
+        try:
+            get_tesseract_version()
+            ocr_config = get_ocr_config()
+            pdf_bytes.seek(0)
+            with pdfplumber.open(pdf_bytes) as pdf:
+                pages_text = []
+                for page in pdf.pages:
+                    page_image = page.to_image(resolution=300)
+                    pil_image = page_image.original
+                    ocr_text = pytesseract.image_to_string(
+                        pil_image,
+                        lang="rus+eng",
+                        config=" ".join(ocr_config),
+                    )
+                    if ocr_text and ocr_text.strip():
+                        pages_text.append(ocr_text.strip())
+
+                if pages_text:
+                    return "\n".join(pages_text)
+
+        except Exception as e:
+            logger.warning(f"OCR не сработал: {e}")
+
+        return ""
+
+    def _clean_text(self, text: str) -> str:
+        """Очистить текст от артефактов PDF.
+
+        Args:
+            text: Сырой текст из PDF
+
+        Returns:
+            Очищенный текст
+        """
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
+
+        text = re.sub(r"([а-яёА-ЯЁa-zA-Z0-9])\s{2,}", r"\1 ", text)
+
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
+        lines = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line:
+                lines.append(line)
+
+        return "\n".join(lines)
+
+    def _extract_title_from_url(self, url: str) -> str:
+        """Извлечь название документа из URL.
+
+        Args:
+            url: URL документа
+
+        Returns:
+            Название документа
+        """
+        filename = url.split("/")[-1]
+        filename = re.sub(r"\?.*$", "", filename)
+        filename = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
+        filename = filename.replace("-", " ").replace("_", " ")
+        filename = re.sub(r"\s+", " ", filename)
+        return filename.strip()
