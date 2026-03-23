@@ -1,4 +1,7 @@
-"""Векторный поиск в Базе Знаний."""
+"""Векторный поиск в Базе Знаний.
+
+Осуществляет семантический поиск по чанкам с использованием косинусного сходства.
+"""
 
 import json
 import logging
@@ -13,7 +16,11 @@ _engine = None
 
 
 def get_engine():
-    """Получить движок БД."""
+    """Получить движок подключения к БД.
+
+    Returns:
+        SQLAlchemy Engine
+    """
     global _engine
     if _engine is None:
         db_url = "postgresql://voproshalych:voproshalych@postgres:5432/voproshalych"
@@ -22,7 +29,15 @@ def get_engine():
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Вычислить косинусное сходство."""
+    """Вычислить косинусное сходство между двумя векторами.
+
+    Args:
+        a: Первый вектор
+        b: Второй вектор
+
+    Returns:
+        Значение косинусного сходства от 0 до 1
+    """
     dot_product = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
@@ -38,13 +53,16 @@ async def search_chunks(
 ) -> list[dict]:
     """Найти похожие чанки по эмбеддингу.
 
+    Выполняет косинусное сходство между эмбеддингом запроса и эмбеддингами
+    чанков в базе данных, возвращает top_k наиболее похожих.
+
     Args:
-        query: Текст запроса
-        embedding: Эмбеддинг запроса
-        top_k: Количество результатов
+        query: Текст запроса пользователя
+        embedding: Вектор эмбеддинга запроса
+        top_k: Количество возвращаемых результатов
 
     Returns:
-        Список чанков с текстом и источником
+        Список чанков с текстом, источником и оценкой похожести
     """
     engine = get_engine()
 
@@ -87,13 +105,19 @@ async def search_chunks(
 
 
 def build_context_from_chunks(chunks: list[dict]) -> str:
-    """Построить контекст из чанков.
+    """Построить контекст из чанков для LLM.
+
+    Формирует текстовый контекст в формате:
+    --- Документ N ---
+    Источник: ...
+    Название: ...
+    Содержание: ...
 
     Args:
-        chunks: Список чанков
+        chunks: Список чанков с текстом и метаданными
 
     Returns:
-        Текст контекста для LLM
+        Текст контекста для использования в промпте LLM
     """
     if not chunks:
         return ""

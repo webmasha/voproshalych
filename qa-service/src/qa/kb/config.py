@@ -1,4 +1,4 @@
-"""KB configuration."""
+"""Конфигурация Базы Знаний."""
 
 from pathlib import Path
 
@@ -7,7 +7,13 @@ from dotenv import load_dotenv
 
 
 def _find_env_file() -> Path | None:
-    """Find .env file."""
+    """Найти .env файл в директории проекта.
+
+    Поиск выполняется от текущего файла вверх по директориям.
+
+    Returns:
+        Путь к .env файлу или None, если не найден
+    """
     current = Path(__file__).parent
     for _ in range(5):
         env_path = current / ".env"
@@ -22,7 +28,14 @@ if env_file := _find_env_file():
 
 
 class KBConfig(BaseSettings):
-    """Knowledge Base configuration."""
+    """Конфигурация Базы Знаний.
+
+    Attributes:
+        embedding_model: Название модели для эмбеддингов
+        chunk_size: Максимальный размер чанка в символах
+        chunk_overlap: Перекрытие между чанками в символах
+        min_chunk_size: Минимальный размер чанка для сохранения
+    """
 
     embedding_model: str = "deepvk/USER-bge-m3"
     chunk_size: int = 1000
@@ -39,7 +52,11 @@ _config: KBConfig | None = None
 
 
 def get_kb_config() -> KBConfig:
-    """Get KB configuration."""
+    """Получить конфигурацию Базы Знаний.
+
+    Returns:
+        Объект KBConfig с настройками
+    """
     global _config
     if _config is None:
         _config = KBConfig()

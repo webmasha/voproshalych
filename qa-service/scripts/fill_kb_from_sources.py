@@ -6,6 +6,13 @@
 Аргументы:
     --clear   Очистить таблицы перед заполнением (по умолчанию)
     --resume  Продолжить с последнего места (без очистки)
+
+Пример использования:
+    # Очистить и заполнить с нуля
+    python scripts/fill_kb_from_sources.py --clear
+
+    # Продолжить с последнего места
+    python scripts/fill_kb_from_sources.py --resume
 """
 
 import argparse
@@ -36,6 +43,17 @@ MAX_URL_LENGTH = 2048
 
 
 def sanitize_title(title: str) -> str:
+    """Очистить и обрезать заголовок документа.
+
+    Выполняет URL-decoding, удаляет непечатные символы и обрезает
+    до MAX_TITLE_LENGTH символов.
+
+    Args:
+        title: Заголовок документа
+
+    Returns:
+        Очищенный заголовок
+    """
     title = unquote(title)
     title = re.sub(r"[\x00-\x1f\x7f]", "", title)
     if len(title) > MAX_TITLE_LENGTH:
@@ -44,6 +62,14 @@ def sanitize_title(title: str) -> str:
 
 
 def sanitize_url(url: str) -> str:
+    """Обрезать URL до максимальной длины.
+
+    Args:
+        url: URL документа
+
+    Returns:
+        Обрезанный URL
+    """
     if len(url) > MAX_URL_LENGTH:
         url = url[:MAX_URL_LENGTH]
     return url
@@ -51,13 +77,21 @@ def sanitize_url(url: str) -> str:
 
 @dataclass
 class Config:
+    """Конфигурация источников для заполнения Базы Знаний.
+
+    Содержит URL страниц с которых парсятся PDF документы.
+    """
+
     confluence_pages: list[str] = field(
         default_factory=lambda: [
             "https://confluence.utmn.ru/pages/viewpage.action?pageId=8037875",
             "https://confluence.utmn.ru/pages/viewpage.action?pageId=121897057",
         ]
     )
+    """Страницы Confluence с PDF документами."""
+
     sveden_url: str = "https://sveden.utmn.ru/sveden/document/"
+    """URL страницы Сведения об организации."""
 
     utmn_pages: list[str] = field(
         default_factory=lambda: [
@@ -90,6 +124,15 @@ class Config:
 
 @dataclass
 class Document:
+    """Модель документа для обработки.
+
+    Attributes:
+        url: URL документа
+        title: Название документа
+        text_content: Текстовое содержимое
+        source_type: Тип источника (confluence/sveden/utmn)
+    """
+
     url: str
     title: str
     text_content: str
@@ -98,12 +141,27 @@ class Document:
 
 @dataclass
 class ChunkWithMeta:
+    """Чанк с метаданными для сохранения в БД.
+
+    Attributes:
+        chunk: Объект чанка
+        source_type: Тип источника
+        document_title: Название документа
+    """
+
     chunk: Chunk
     source_type: str
     document_title: str
 
 
 def get_db_engine():
+    """Создать подключение к базе данных.
+
+    Определяет хост PostgreSQL (docker или localhost) и создаёт движок SQLAlchemy.
+
+    Returns:
+        SQLAlchemy Engine для подключения к БД
+    """
     import socket
 
     try:
@@ -130,6 +188,16 @@ def get_db_engine():
 
 
 def load_existing_urls(engine) -> set[str]:
+    """Загрузить существующие URL документов из базы данных.
+
+    Используется при запуске с --resume для пропуска уже обработанных документов.
+
+    Args:
+        engine: SQLAlchemy Engine
+
+    Returns:
+        Множество URL документов уже в БД
+    """
     with engine.connect() as conn:
         result = conn.execute(text("SELECT DISTINCT source_url FROM chunks"))
         urls = {row[0] for row in result}
@@ -138,6 +206,13 @@ def load_existing_urls(engine) -> set[str]:
 
 
 def clear_tables(engine) -> None:
+    """Очистить таблицы чанков и эмбеддингов.
+
+    Выполняет TRUNCATE с удалением связанных записей.
+
+    Args:
+        engine: SQLAlchemy Engine
+    """
     logger.info("Очистка таблиц chunks и embeddings...")
 
     with engine.connect() as conn:
@@ -153,6 +228,19 @@ def save_chunks_batch(
     chunks_with_meta: list[ChunkWithMeta],
     embeddings: list[list[float]],
 ) -> int:
+    """Сохранить чанки и эмбеддинги в базу данных.
+
+    Выполняет вставку в таблицы chunks и embeddings с применением
+    sanitize функций для заголовков и URL.
+
+    Args:
+        engine: SQLAlchemy Engine
+        chunks_with_meta: Список чанков с метаданными
+        embeddings: Список векторов эмбеддингов
+
+    Returns:
+        Количество сохранённых чанков
+    """
     count = len(chunks_with_meta)
     logger.info(f"  → Сохранение {count} чанков в БД...")
 
@@ -199,6 +287,15 @@ def chunk_document(
     doc: Document,
     chunker: TextChunker,
 ) -> list[ChunkWithMeta]:
+    """Разбить документ на чанки.
+
+    Args:
+        doc: Документ для разбиения
+        chunker: Объект TextChunker
+
+    Returns:
+        Список чанков с метаданными
+    """
     chunks = list(
         chunker.chunk_text(
             text=doc.text_content,

@@ -1,4 +1,7 @@
-"""Основное приложение FastAPI."""
+"""Основное приложение FastAPI для QA-сервиса.
+
+Содержит endpoints для вопросов-ответов и проверки здоровья сервиса.
+"""
 
 import logging
 from contextlib import asynccontextmanager
@@ -18,7 +21,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Управление жизненным циклом."""
+    """Управление жизненным циклом приложения.
+
+    При старте инициализирует LLM Pool и логирует доступные провайдеры.
+    При завершении логирует остановку сервиса.
+
+    Args:
+        app: Приложение FastAPI
+    """
     logger.info("Starting QA service...")
 
     llm_pool = get_llm_pool()
@@ -31,7 +41,11 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    """Создать приложение FastAPI."""
+    """Создать и настроить приложение FastAPI.
+
+    Returns:
+        Настроенное приложение FastAPI
+    """
     app = FastAPI(
         title="QA Service",
         description="QA Service with LLM Pool",
