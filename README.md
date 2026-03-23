@@ -134,6 +134,26 @@ GIGACHAT_CLIENT_ID=your_id
 GIGACHAT_CLIENT_SECRET=your_secret
 ```
 
+## Бэкап и восстановление БД
+
+### Экспорт базы знаний
+
+```bash
+cd Submodules/voproshalych_v2
+docker compose exec -T postgres pg_dump -U voproshalych -d voproshalych > voproshalych_db_$(date +%Y%m%d).sql
+```
+
+### Импорт базы знаний
+
+```bash
+cd Submodules/voproshalych_v2
+docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_20260323.sql
+```
+
+**Примечание:**
+- При импорте таблицы очищаются и заполняются заново
+- Рекомендуется регулярные бэкапы (еженедельно/еженемесячно)
+
 ## Документация
 
 - docs/pipeline-user-query.md — Пайплайн обработки запроса пользователя
