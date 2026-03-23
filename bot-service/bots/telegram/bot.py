@@ -16,7 +16,12 @@ from typing import Any
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -28,9 +33,7 @@ class Settings:
 
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     bot_core_url: str = os.getenv("BOT_CORE_URL", "http://127.0.0.1:8000")
-    request_timeout_seconds: float = float(
-        os.getenv("BOT_CORE_TIMEOUT_SECONDS", "10")
-    )
+    request_timeout_seconds: float = float(os.getenv("BOT_CORE_TIMEOUT_SECONDS", "10"))
 
 
 class CoreClient:
@@ -84,7 +87,9 @@ class CoreClient:
             "user_id": str(callback.from_user.id),
             "chat_id": str(callback.message.chat.id) if callback.message else "",
             "callback_data": callback.data or "",
-            "message_id": str(callback.message.message_id) if callback.message else None,
+            "message_id": str(callback.message.message_id)
+            if callback.message
+            else None,
             "metadata": {},
         }
         response = await self._client.post("/callbacks", json=payload)
@@ -153,6 +158,20 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
         try:
             bot_response = await core_client.process_message(message)
+        except httpx.HTTPStatusError as e:
+            logging.error(
+                f"HTTP error from core: {e.response.status_code} - {e.response.text[:200]}"
+            )
+            await delete_message_safely(pending_message)
+            await message.answer("Сервис временно недоступен. Попробуйте позже.")
+            return
+        except httpx.TimeoutException:
+            logging.error("Timeout connecting to core service")
+            await delete_message_safely(pending_message)
+            await message.answer(
+                "Ответ занимает слишком много времени. Попробуйте позже."
+            )
+            return
         except httpx.HTTPError:
             logging.exception("Failed to process Telegram message via core")
             await delete_message_safely(pending_message)
@@ -177,6 +196,14 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
         """
         try:
             bot_response = await core_client.process_callback(callback)
+        except httpx.HTTPStatusError as e:
+            logging.error(f"HTTP error from core: {e.response.status_code}")
+            await callback.answer("Сервис временно недоступен.")
+            return
+        except httpx.TimeoutException:
+            logging.error("Timeout connecting to core service")
+            await callback.answer("Сервис временно недоступен.")
+            return
         except httpx.HTTPError:
             logging.exception("Failed to process Telegram callback via core")
             await callback.answer("Сервис временно недоступен.")
@@ -197,7 +224,9 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
     return dispatcher
 
 
-def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> InlineKeyboardMarkup | None:
+def build_inline_keyboard(
+    button_rows: list[list[dict[str, str]]],
+) -> InlineKeyboardMarkup | None:
     """Преобразует кнопки из ответа core в Telegram inline keyboard.
 
     Args:

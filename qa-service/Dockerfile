@@ -22,4 +22,4 @@ ENV PYTHONPATH=/app/src
 
 EXPOSE 8004
 
-CMD ["uv", "run", "uvicorn", "qa.main:app", "--host", "0.0.0.0", "--port", "8004"]
+CMD ["uv", "run", "uvicorn", "qa.main:app", "--host", "0.0.0.0", "--port", "8004", "--log-level", "info"]

@@ -1,6 +1,10 @@
 """Клиент для обращения к QA-сервису."""
 
+import logging
 import httpx
+
+
+logger = logging.getLogger(__name__)
 
 
 class QAServiceClient:
@@ -28,16 +32,28 @@ class QAServiceClient:
 
         Returns:
             str: Ответ QA-сервиса.
+
+        Raises:
+            httpx.HTTPStatusError: При HTTP ошибке от сервиса.
+            httpx.TimeoutException: При таймауте.
         """
+        try:
+            response = self._client.post(
+                "/qa",
+                json={
+                    "question": question,
+                    "context": context,
+                },
+            )
+            response.raise_for_status()
 
-        response = self._client.post(
-            "/qa",
-            json={
-                "question": question,
-                "context": context,
-            },
-        )
-        response.raise_for_status()
-
-        payload = response.json()
-        return payload["answer"]
+            payload = response.json()
+            return payload["answer"]
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"QA service HTTP error: {e.response.status_code} - {e.response.text[:200]}"
+            )
+            raise
+        except httpx.TimeoutException:
+            logger.error(f"QA service timeout after {self._client.timeout}s")
+            raise

@@ -154,9 +154,7 @@ class BotService:
             BotResponse: Сообщение о неподдерживаемом формате.
         """
 
-        reply_text = (
-            f"Формат сообщения {message.message_type} пока не поддерживается."
-        )
+        reply_text = f"Формат сообщения {message.message_type} пока не поддерживается."
 
         return BotResponse(
             actions=[
@@ -176,10 +174,14 @@ class BotService:
         Returns:
             str: Ответ QA-сервиса или fallback-текст.
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
 
         try:
             return self._qa_service_client.ask(question=question)
-        except Exception:
+        except Exception as e:
+            logger.error(f"QA service error: {e}")
             return (
                 "Сейчас не удалось получить ответ от QA-сервиса. "
                 "Попробуйте повторить запрос позже."
