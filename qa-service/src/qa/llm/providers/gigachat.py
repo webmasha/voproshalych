@@ -1,16 +1,18 @@
-"""GigaChat провайдер."""
+"""GigaChat провайдер с использованием официального SDK."""
 
-import base64
-import time
+import logging
 
-import httpx
+from gigachat import GigaChat, ChatCompletion
 
 from .base import BaseLLMProvider, LLMResponse
 from ..config import get_llm_config
 
 
+logger = logging.getLogger(__name__)
+
+
 class GigaChatProvider(BaseLLMProvider):
-    """Провайдер GigaChat (Сбер).
+    """Провайдер GigaChat (Сбер) через официальный SDK.
 
     Attributes:
         client_id: Client ID GigaChat
@@ -26,11 +28,10 @@ class GigaChatProvider(BaseLLMProvider):
             client_secret: Client Secret (опционально, берется из конфига)
         """
         config = get_llm_config()
-        self._client_id = client_id or config.gigachat_client_id
-        self._client_secret = client_secret or config.gigachat_client_secret
+        self._credentials = f"{client_id or config.gigachat_client_id}:{client_secret or config.gigachat_client_secret}"
+        self._scope = "GIGACHAT_API_PERS"
         self._model = "GigaChat"
-        self._access_token: str | None = None
-        self._token_expires_at: float = 0
+        self._client: GigaChat | None = None
 
     @property
     def name(self) -> str:
@@ -39,47 +40,21 @@ class GigaChatProvider(BaseLLMProvider):
 
     def is_available(self) -> bool:
         """Проверить доступность провайдера."""
-        return bool(self._client_id and self._client_secret)
+        return bool(self._credentials and self._credentials != ":")
 
-    async def _get_access_token(self) -> str:
-        """Получить access token.
+    def _get_client(self) -> GigaChat:
+        """Получить или создать клиент GigaChat.
 
         Returns:
-            Access token
-
-        Raises:
-            httpx.HTTPStatusError: При ошибке API
+            Клиент GigaChat
         """
-        if self._access_token and time.time() < self._token_expires_at:
-            return self._access_token
-
-        credentials = f"{self._client_id}:{self._client_secret}"
-        encoded = base64.b64encode(credentials.encode()).decode()
-
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "Authorization": f"Basic {encoded}",
-        }
-
-        payload = {
-            "scope": "GIGACHAT_API_PERS",
-        }
-
-        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-            response = await client.post(
-                "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-                headers=headers,
-                data=payload,
+        if self._client is None:
+            self._client = GigaChat(
+                credentials=self._credentials,
+                scope=self._scope,
+                verify_ssl_certs=False,
             )
-            response.raise_for_status()
-
-            data = response.json()
-            access_token = data["access_token"]
-            self._access_token = access_token
-            self._token_expires_at = time.time() + data.get("expires_at", 1800)
-
-            return access_token
+        return self._client
 
     async def generate(
         self,
@@ -98,42 +73,35 @@ class GigaChatProvider(BaseLLMProvider):
             LLMResponse с ответом
 
         Raises:
-            httpx.HTTPStatusError: При ошибке API
+            Exception: При ошибке API
         """
-        access_token = await self._get_access_token()
+        try:
+            client = self._get_client()
 
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {access_token}",
-        }
-
-        payload = {
-            "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "n": 1,
-        }
-
-        async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
-            response = await client.post(
-                "https://ngw.devices.sberbank.ru:9443/api/v2/chat/completions",
-                headers=headers,
-                json=payload,
+            response: ChatCompletion = client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
-            response.raise_for_status()
 
-            data = response.json()
+            content = response.choices[0].message.content
 
             return LLMResponse(
-                content=data["choices"][0]["message"]["content"],
+                content=content,
                 model=self._model,
                 usage={
-                    "prompt_tokens": data.get("usage", {}).get("prompt_tokens", 0),
-                    "completion_tokens": data.get("usage", {}).get(
-                        "completion_tokens", 0
-                    ),
-                    "total_tokens": data.get("usage", {}).get("total_tokens", 0),
+                    "prompt_tokens": response.usage.prompt_tokens
+                    if response.usage
+                    else 0,
+                    "completion_tokens": response.usage.completion_tokens
+                    if response.usage
+                    else 0,
+                    "total_tokens": response.usage.total_tokens
+                    if response.usage
+                    else 0,
                 },
             )
+
+        except Exception as e:
+            logger.error(f"GigaChat API error: {e}")
+            raise

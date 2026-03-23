@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .api import qa_router, health_router, kb_router
+from .api import qa_router, health_router
 from .llm import get_llm_pool
 
 logging.basicConfig(
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Управление жизненным циклом приложения."""
+    """Управление жизненным циклом."""
     logger.info("Starting QA service...")
 
     llm_pool = get_llm_pool()
@@ -31,21 +31,16 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    """Создать приложение FastAPI.
-
-    Returns:
-        FastAPI приложение
-    """
+    """Создать приложение FastAPI."""
     app = FastAPI(
         title="QA Service",
-        description="QA Service with LLM Pool and Knowledge Base",
+        description="QA Service with LLM Pool",
         version="0.1.0",
         lifespan=lifespan,
     )
 
     app.include_router(health_router)
     app.include_router(qa_router)
-    app.include_router(kb_router)
 
     return app
 

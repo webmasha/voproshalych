@@ -39,7 +39,7 @@ class LLMPool:
                 client_secret=self._config.gigachat_client_secret,
             ),
         }
-        logger.info(f"LLM providers initialized: {list(self._providers.keys())}")
+        logger.debug(f"LLM providers initialized: {list(self._providers.keys())}")
 
     def get_available_providers(self) -> list[str]:
         """Получить список доступных провайдеров.
@@ -62,7 +62,7 @@ class LLMPool:
         available = self.get_available_providers()
         for provider_name in self._config.model_priority:
             if provider_name in available:
-                logger.info(f"Selected provider: {provider_name}")
+                logger.debug(f"Selected provider: {provider_name}")
                 return provider_name
 
         logger.warning("No available LLM providers")
@@ -114,13 +114,13 @@ class LLMPool:
                 continue
 
             try:
-                logger.info(f"Calling provider: {prov_name}")
+                logger.debug(f"Calling provider: {prov_name}")
                 response = await provider.generate(
                     prompt=prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-                logger.info(f"Provider {prov_name} succeeded")
+                logger.debug(f"Provider {prov_name} succeeded")
                 return response
             except Exception as e:
                 logger.warning(f"Provider {prov_name} failed: {e}")

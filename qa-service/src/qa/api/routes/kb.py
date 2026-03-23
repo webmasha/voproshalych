@@ -1,4 +1,4 @@
-"""KB routes."""
+"""API роуты для работы с Базой Знаний."""
 
 import json
 import logging
@@ -13,6 +13,7 @@ from qa.kb.chunking import Chunk, TextChunker
 from qa.kb.config import get_kb_config
 from qa.kb.embedding import get_embedding
 from qa.kb.parsers.web import WebPageParser
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ _engine = None
 
 
 def get_engine():
-    """Get database engine."""
+    """Получить движок базы данных."""
     global _engine
     if _engine is None:
         db_url = "postgresql://voproshalych:voproshalych@postgres:5432/voproshalych"
@@ -38,13 +39,13 @@ def get_engine():
 
 
 class DocumentRequest(BaseModel):
-    """Request to download a document."""
+    """Запрос на скачивание документа."""
 
     url: HttpUrl
 
 
 class ChunkResponse(BaseModel):
-    """Response with chunk data."""
+    """Ответ с данными чанка."""
 
     id: str
     text: str
@@ -54,7 +55,7 @@ class ChunkResponse(BaseModel):
 
 
 class DocumentResponse(BaseModel):
-    """Response with downloaded document."""
+    """Ответ со скачанным документом."""
 
     url: str
     title: str
@@ -62,7 +63,7 @@ class DocumentResponse(BaseModel):
 
 
 async def _save_chunk_to_db(chunk: Chunk, embedding: list[float]) -> None:
-    """Save chunk and embedding to database."""
+    """Сохранить чанк и эмбеддинг в базу данных."""
     engine = get_engine()
     chunk_id = uuid.uuid4()
 
@@ -97,17 +98,17 @@ async def _save_chunk_to_db(chunk: Chunk, embedding: list[float]) -> None:
 
 @router.post("/documents", response_model=DocumentResponse)
 async def download_document(request: DocumentRequest) -> DocumentResponse:
-    """Download and parse a web page or PDF, then chunk and embed it.
+    """Скачать и распарсить веб-страницу или PDF, затем чанкировать и создать эмбеддинги.
 
     Args:
-        request: DocumentRequest with URL to download
+        request: DocumentRequest с URL документа для скачивания
 
     Returns:
-        DocumentResponse with parsed content
+        DocumentResponse с информацией о распарсенном документе
     """
     try:
         parsed = await _parser.parse(str(request.url))
-        logger.info(f"Parsed document: {parsed.title}")
+        logger.info(f"Распарсен документ: {parsed.title}")
 
         chunks_count = 0
         for chunk in _chunker.chunk_text(
@@ -118,7 +119,7 @@ async def download_document(request: DocumentRequest) -> DocumentResponse:
             embedding = get_embedding(chunk.text)
             await _save_chunk_to_db(chunk, embedding)
             chunks_count += 1
-            logger.info(f"Created chunk {chunks_count}: {chunk.text[:50]}...")
+            logger.info(f"Создан чанк {chunks_count}: {chunk.text[:50]}...")
 
         return DocumentResponse(
             url=parsed.url,
@@ -127,11 +128,13 @@ async def download_document(request: DocumentRequest) -> DocumentResponse:
         )
 
     except Exception as e:
-        logger.error(f"Failed to process document: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to process document: {e}")
+        logger.error(f"Не удалось обработать документ: {e}")
+        raise HTTPException(
+            status_code=400, detail=f"Не удалось обработать документ: {e}"
+        )
 
 
 @router.get("/health")
 async def kb_health():
-    """KB health check."""
+    """Проверка работоспособности KB сервиса."""
     return {"status": "ok", "embedding_model": get_kb_config().embedding_model}

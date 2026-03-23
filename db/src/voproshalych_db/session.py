@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from dotenv import load_dotenv
 
 
-# Find .env file
+# Найти .env файл
 def _find_env_file() -> Path | None:
     current = Path(__file__).parent
     for _ in range(5):
@@ -22,7 +22,7 @@ def _find_env_file() -> Path | None:
 if env_file := _find_env_file():
     load_dotenv(env_file)
 
-# Database configuration
+# Конфигурация базы данных
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "voproshalych")
