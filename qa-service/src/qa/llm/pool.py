@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from .providers.base import BaseLLMProvider, LLMResponse
-from .providers import MistralProvider, OpenRouterProvider, GigaChatProvider
+from .providers import MistralProvider, OpenRouterProvider, GigaChatProvider, YandexCloudProvider
 from .config import get_llm_config, LLMConfig
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,10 @@ class LLMPool:
             "gigachat": GigaChatProvider(
                 client_id=self._config.gigachat_client_id,
                 client_secret=self._config.gigachat_client_secret,
+            ),
+            "yandexcloud": YandexCloudProvider(
+                api_key=self._config.yandex_api_key,
+                folder_id=self._config.yandex_folder_id,
             ),
         }
         logger.debug(f"LLM providers initialized: {list(self._providers.keys())}")

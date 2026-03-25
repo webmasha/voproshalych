@@ -8,6 +8,7 @@ from .providers import (
     MistralProvider,
     OpenRouterProvider,
     GigaChatProvider,
+    YandexCloudProvider,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "MistralProvider",
     "OpenRouterProvider",
     "GigaChatProvider",
+    "YandexCloudProvider",
 ]
