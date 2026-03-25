@@ -27,6 +27,16 @@ class BaseLLMProvider(ABC):
     def name(self) -> str:
         """Имя провайдера."""
         pass
+    
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Проверить доступность провайдера."""
+        pass
+    
+    @abstractmethod
+    async def check_health(self) -> bool:
+        """Проверить связь с API."""
+        pass
 
     @abstractmethod
     async def generate(
@@ -45,9 +55,4 @@ class BaseLLMProvider(ABC):
         Returns:
             LLMResponse с ответом
         """
-        pass
-
-    @abstractmethod
-    def is_available(self) -> bool:
-        """Проверить доступность провайдера."""
         pass

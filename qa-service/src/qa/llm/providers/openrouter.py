@@ -1,10 +1,12 @@
 """OpenRouter провайдер."""
 
 import httpx
+import logging
 
 from .base import BaseLLMProvider, LLMResponse
 from ..config import get_llm_config
 
+logger = logging.getLogger(__name__)
 
 class OpenRouterProvider(BaseLLMProvider):
     """Провайдер OpenRouter.
@@ -32,6 +34,23 @@ class OpenRouterProvider(BaseLLMProvider):
     def is_available(self) -> bool:
         """Проверить доступность провайдера."""
         return bool(self._api_key)
+    
+    async def check_health(self) -> bool:
+        """Проверить доступность через эндпоинт валидации ключа."""
+        if not self.is_available():
+            return False
+            
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers=headers
+                )
+                return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"OpenRouter health check failed: {e}")
+            return False
 
     async def generate(
         self,

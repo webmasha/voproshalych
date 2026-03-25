@@ -1,11 +1,12 @@
 """Mistral AI провайдер."""
 
 import httpx
-from pydantic import Field
+import logging
 
 from .base import BaseLLMProvider, LLMResponse
 from ..config import get_llm_config
 
+logger = logging.getLogger(__name__)
 
 class MistralProvider(BaseLLMProvider):
     """Провайдер Mistral AI.
@@ -34,6 +35,23 @@ class MistralProvider(BaseLLMProvider):
     def is_available(self) -> bool:
         """Проверить доступность провайдера."""
         return bool(self._api_key)
+    
+    async def check_health(self) -> bool:
+        """Проверить доступность API через эндпоинт /models."""
+        if not self.is_available():
+            return False
+            
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    "https://api.mistral.ai/v1/models",
+                    headers=headers
+                )
+                return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"Mistral health check failed: {e}")
+            return False
 
     async def generate(
         self,

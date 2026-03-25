@@ -55,6 +55,19 @@ class GigaChatProvider(BaseLLMProvider):
                 verify_ssl_certs=False,
             )
         return self._client
+    
+    async def check_health(self) -> bool:
+        """Проверить доступность API через запрос списка моделей."""
+        if not self.is_available():
+            return False
+            
+        try:
+            client = self._get_client()
+            client.get_models()
+            return True
+        except Exception as e:
+            logger.warning(f"GigaChat health check failed: {e}")
+            return False
 
     async def generate(
         self,

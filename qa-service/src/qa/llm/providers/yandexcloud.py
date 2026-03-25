@@ -22,7 +22,7 @@ class YandexCloudProvider(BaseLLMProvider):
         config = get_llm_config()
         self._api_key = api_key or config.yandex_cloud_api_key
         self._folder_id = folder_id or config.yandex_cloud_folder
-        self._model = f"gpt://{self._folder_id}/aliceai-llm/latest"
+        self._model = f"gpt://{self._folder_id}/gpt-oss-20b/latest"
 
     @property
     def name(self) -> str:
@@ -32,6 +32,23 @@ class YandexCloudProvider(BaseLLMProvider):
     def is_available(self) -> bool:
         """Проверить доступность провайдера."""
         return bool(self._api_key and self._folder_id)
+    
+    async def check_health(self) -> bool:
+        """Проверить доступность API через эндпоинт /models."""
+        if not self.is_available():
+            return False
+            
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    "https://llm.api.cloud.yandex.net/v1/models",
+                    headers=headers
+                )
+                return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"Yandex Cloud health check failed: {e}")
+            return False
 
     async def generate(
         self,
