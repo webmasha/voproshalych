@@ -34,6 +34,8 @@ services:
     build:
       context: ./qa-service
       dockerfile: Dockerfile
+      secrets:
+        - hf_token
     restart: unless-stopped
     env_file:
       - .env
@@ -43,6 +45,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
       POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
+      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "8004:8004"
     depends_on:
@@ -146,3 +149,7 @@ services:
 
 volumes:
   postgres_data:
+
+secrets:
+  hf_token:
+    environment: HF_TOKEN

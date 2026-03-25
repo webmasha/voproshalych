@@ -15,10 +15,14 @@ ENV UV_SYSTEM_PYTHON=1
 
 RUN uv sync
 
+COPY save_models.py ./
+RUN test -f /run/secrets/hf_token && HF_TOKEN=$(cat /run/secrets/hf_token) uv run python save_models.py || uv run python save_models.py
+
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
 ENV PYTHONPATH=/app/src
+ENV HF_TOKEN=${HF_TOKEN:-}
 
 EXPOSE 8004
 
