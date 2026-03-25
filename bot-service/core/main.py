@@ -1,6 +1,10 @@
 """FastAPI-приложение, которое отдает общую бизнес-логику бота."""
 
+import logging
+
 from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
 
 from config import settings
 from models.callback import CallbackEvent
@@ -34,6 +38,7 @@ def process_message(message: IncomingMessage) -> BotResponse:
         BotResponse: Действия, которые должен выполнить вызывающий адаптер.
     """
 
+    logger.info("Received message payload: %s", message.model_dump())
     return bot_service.handle_message(message)
 
 

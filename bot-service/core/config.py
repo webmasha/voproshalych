@@ -17,7 +17,7 @@ class Settings:
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "voproshalych")
     qa_service_url: str = os.getenv("QA_SERVICE_URL", "http://qa-service:8004")
     qa_service_timeout_seconds: float = float(
-        os.getenv("QA_SERVICE_TIMEOUT_SECONDS", "30")
+        os.getenv("QA_SERVICE_TIMEOUT_SECONDS", "300")
     )
 
 

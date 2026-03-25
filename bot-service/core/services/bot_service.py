@@ -176,16 +176,34 @@ class BotService:
         """
         import logging
 
+        from services.qa_service_client import (
+            QAServiceTimeout,
+            QAServiceUnavailable,
+            QAServiceError,
+        )
+
         logger = logging.getLogger(__name__)
 
         try:
             return self._qa_service_client.ask(question=question)
-        except Exception as e:
-            logger.error(f"QA service error: {e}")
+        except QAServiceTimeout:
+            logger.error("QA service timeout")
             return (
-                "Сейчас не удалось получить ответ от QA-сервиса. "
-                "Попробуйте повторить запрос позже."
+                "Поиск ответа занимает дольше обычного. "
+                "Попробуйте переформулировать вопрос или повторить позже."
             )
+        except QAServiceUnavailable:
+            logger.error("QA service unavailable")
+            return (
+                "Сервис временно недоступен. "
+                "Мы уже работаем над устранением проблемы. Попробуйте через несколько минут."
+            )
+        except QAServiceError as e:
+            logger.error(f"QA service error: {e}")
+            return "Не удалось сформировать ответ. Попробуйте переформулировать вопрос."
+        except Exception as e:
+            logger.error(f"Unexpected QA error: {e}")
+            return "Что-то пошло не так. Попробуйте повторить запрос позже."
 
     def _build_start_response(self, message: IncomingMessage, user) -> BotResponse:
         """Возвращает стартовое сообщение и базовые inline-кнопки.

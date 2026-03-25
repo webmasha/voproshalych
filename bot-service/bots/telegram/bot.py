@@ -33,7 +33,7 @@ class Settings:
 
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     bot_core_url: str = os.getenv("BOT_CORE_URL", "http://127.0.0.1:8000")
-    request_timeout_seconds: float = float(os.getenv("BOT_CORE_TIMEOUT_SECONDS", "10"))
+    request_timeout_seconds: float = float(os.getenv("BOT_CORE_TIMEOUT_SECONDS", "300"))
 
 
 class CoreClient:
@@ -154,28 +154,52 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
         pending_message: Message | None = None
         if should_show_pending_message(message):
-            pending_message = await message.answer("Скоро будет получен ответ...")
+            pending_message = await message.answer("Ищу ответ на ваш вопрос...")
 
         try:
             bot_response = await core_client.process_message(message)
         except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
             logging.error(
-                f"HTTP error from core: {e.response.status_code} - {e.response.text[:200]}"
+                f"HTTP error from core: {status_code} - {e.response.text[:200]}"
             )
             await delete_message_safely(pending_message)
-            await message.answer("Сервис временно недоступен. Попробуйте позже.")
+
+            if status_code == 503:
+                await message.answer(
+                    "Сервис временно недоступен. "
+                    "Пожалуйста, попробуйте через несколько минут."
+                )
+            elif status_code >= 500:
+                await message.answer(
+                    "Произошла внутренняя ошибка сервиса. "
+                    "Мы уже работаем над её устранением."
+                )
+            else:
+                await message.answer(
+                    "Не удалось обработать запрос. Попробуйте переформулировать вопрос."
+                )
             return
         except httpx.TimeoutException:
             logging.error("Timeout connecting to core service")
             await delete_message_safely(pending_message)
             await message.answer(
-                "Ответ занимает слишком много времени. Попробуйте позже."
+                "Поиск ответа занимает слишком долго. "
+                "Попробуйте переформулировать вопрос."
+            )
+            return
+        except httpx.ConnectError:
+            logging.error("Cannot connect to core service")
+            await delete_message_safely(pending_message)
+            await message.answer(
+                "Не удалось подключиться к сервису. "
+                "Проверьте подключение и попробуйте позже."
             )
             return
         except httpx.HTTPError:
             logging.exception("Failed to process Telegram message via core")
             await delete_message_safely(pending_message)
-            await message.answer("Сервис временно недоступен.")
+            await message.answer("Что-то пошло не так. Пожалуйста, попробуйте ещё раз.")
             return
 
         await delete_message_safely(pending_message)
