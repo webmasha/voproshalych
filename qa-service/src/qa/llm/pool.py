@@ -1,5 +1,7 @@
 """LLM Pool - управление провайдерами с fallback."""
 
+import time
+
 import logging
 from typing import Any
 
@@ -116,7 +118,8 @@ class LLMPool:
             if not provider.is_available():
                 logger.warning(f"Provider {prov_name} is not available")
                 continue
-
+            
+            start_time = time.perf_counter()
             try:
                 logger.debug(f"Calling provider: {prov_name}")
                 response = await provider.generate(
@@ -124,10 +127,23 @@ class LLMPool:
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-                logger.debug(f"Provider {prov_name} succeeded")
+                
+                latency = time.perf_counter() - start_time
+                
+                prompt_t = response.usage.get("prompt_tokens", 0)
+                comp_t = response.usage.get("completion_tokens", 0)
+                total_t = response.usage.get("total_tokens", 0)
+                
+                logger.info(
+                    f"Provider '{prov_name}' succeeded | Latency: {latency:.2f}s | "
+                    f"Tokens: {total_t} (Prompt: {prompt_t}, Completion: {comp_t}) | "
+                    f"Model: {response.model}"
+                )
+                
                 return response
             except Exception as e:
-                logger.warning(f"Provider {prov_name} failed: {e}")
+                latency = time.perf_counter() - start_time
+                logger.warning(f"Provider '{prov_name}' failed after {latency:.2f}s: {e}")
                 last_error = e
                 continue
 
