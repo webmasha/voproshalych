@@ -26,25 +26,25 @@
 
 ## Быстрый запуск
 
-1. Скопируй переменные окружения:
+1. Копирование переменных окружения:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Запусти все сервисы (включая MAX-бот):
+2. Запуск всех сервисов (включая MAX-бот):
 
 ```bash
 docker compose up -d --build
 ```
 
-3. Запусти сервисы без MAX-бота (если `MAX_BOT_TOKEN` не задан):
+3. Запуск сервисов без MAX-бота (если `MAX_BOT_TOKEN` не задан):
 
 ```bash
 docker compose up -d --build postgres db-migrate qa-service bot-core telegram-bot vk-bot
 ```
 
-4. Запусти только backend-контур без платформенных ботов:
+4. Запуск только backend-контура без платформенных ботов:
 
 ```bash
 docker compose up -d --build postgres db-migrate qa-service bot-core
@@ -70,23 +70,10 @@ curl http://localhost:8004/health
 curl -X POST http://localhost:8004/qa -H "Content-Type: application/json" -d '{"question":"Какие правила приема в магистратуру?"}'
 ```
 
-## Бэкап базы
-
-Экспорт:
-
-```bash
-docker compose exec -T postgres pg_dump -U voproshalych -d voproshalych > voproshalych_db_$(date +%Y%m%d).sql
-```
-
-Импорт:
-
-```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql
-```
-
 ## Документация
 
 - `docs/pipeline-user-query.md`
+- `docs/onboarding_guide/INSTRUCTIONS.md`
 - `qa-service/docs/KB_FILL_GUIDE.md`
 - `qa-service/docs/testing.md`
 - `qa-service/docs/message-flow.md`
