@@ -1,11 +1,10 @@
 """Векторный поиск в Базе Знаний.
 
-Осуществляет семантический поиск по чанкам с использованием косинусного сходства.
+Осуществляет семантический поиск по чанкам с использованием pgvector
+для косинусного сходства на уровне PostgreSQL.
 """
 
-import json
 import logging
-import math
 from typing import Optional
 
 from sqlalchemy import create_engine, text
@@ -28,33 +27,15 @@ def get_engine():
     return _engine
 
 
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Вычислить косинусное сходство между двумя векторами.
-
-    Args:
-        a: Первый вектор
-        b: Второй вектор
-
-    Returns:
-        Значение косинусного сходства от 0 до 1
-    """
-    dot_product = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot_product / (norm_a * norm_b)
-
-
 async def search_chunks(
     query: str,
     embedding: list[float],
     top_k: int = 5,
 ) -> list[dict]:
-    """Найти похожие чанки по эмбеддингу.
+    """Найти похожие чанки по эмбеддингу через pgvector.
 
-    Выполняет косинусное сходство между эмбеддингом запроса и эмбеддингами
-    чанков в базе данных, возвращает top_k наиболее похожих.
+    Использует оператор <=> (косинусное сходство) на уровне PostgreSQL
+    для эффективного поиска без загрузки всех данных в память.
 
     Args:
         query: Текст запроса пользователя
@@ -66,38 +47,41 @@ async def search_chunks(
     """
     engine = get_engine()
 
+    embedding_str = "[" + ",".join(map(str, embedding)) + "]"
+
     try:
         with engine.connect() as conn:
             result = conn.execute(
                 text("""
-                    SELECT c.id, c.text, c.title, c.source_url, e.embedding
+                    SELECT 
+                        c.id, 
+                        c.text, 
+                        c.title, 
+                        c.source_url,
+                        (e.embedding_vector <=> cast(:embedding as vector)) as similarity
                     FROM chunks c
                     JOIN embeddings e ON c.id = e.chunk_id
+                    WHERE e.embedding_vector IS NOT NULL
+                    ORDER BY e.embedding_vector <=> cast(:embedding as vector)
+                    LIMIT :top_k
                 """),
+                {"embedding": embedding_str, "top_k": top_k},
             )
 
-            chunks_with_scores = []
+            chunks = []
             for row in result:
-                try:
-                    chunk_emb = json.loads(row.embedding)
-                    similarity = cosine_similarity(embedding, chunk_emb)
-                    chunks_with_scores.append(
-                        {
-                            "id": str(row.id),
-                            "text": row.text,
-                            "title": row.title,
-                            "source_url": row.source_url,
-                            "similarity": similarity,
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to parse embedding: {e}")
-                    continue
+                chunks.append(
+                    {
+                        "id": str(row.id),
+                        "text": row.text,
+                        "title": row.title,
+                        "source_url": row.source_url,
+                        "similarity": float(row.similarity) if row.similarity else 0.0,
+                    }
+                )
 
-            chunks_with_scores.sort(key=lambda x: x["similarity"], reverse=True)
-            chunks = chunks_with_scores[:top_k]
     except Exception as e:
-        logger.error(f"DB query failed: {e}")
+        logger.error(f"Vector search failed: {e}")
         raise
 
     logger.info(f"Found {len(chunks)} chunks for query: {query[:50]}...")

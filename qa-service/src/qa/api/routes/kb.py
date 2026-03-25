@@ -3,7 +3,6 @@
 import json
 import logging
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
@@ -83,14 +82,16 @@ async def _save_chunk_to_db(chunk: Chunk, embedding: list[float]) -> None:
         )
         conn.commit()
 
+        embedding_str = "[" + ",".join(map(str, embedding)) + "]"
         conn.execute(
             text("""
-                INSERT INTO embeddings (chunk_id, embedding)
-                VALUES (:chunk_id, :embedding)
+                INSERT INTO embeddings (chunk_id, embedding, embedding_vector)
+                VALUES (:chunk_id, :embedding, :embedding_vector::vector)
             """),
             {
                 "chunk_id": str(chunk_id),
                 "embedding": json.dumps(embedding),
+                "embedding_vector": embedding_str,
             },
         )
         conn.commit()
