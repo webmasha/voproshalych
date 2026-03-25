@@ -1,10 +1,9 @@
 """Функции для интеграции существующей Базы Знаний с LightRAG."""
 
 import logging
+from typing import Optional
 
 from sqlalchemy import create_engine, text
-
-from qa.kb.embedding import get_embedding
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ def _get_engine():
     return _engine
 
 
-def get_existing_chunks(limit: int = None) -> list[dict]:
+def get_existing_chunks(limit: Optional[int] = None) -> list[dict]:
     """Получить все существующие чанки из БД.
 
     Args:
@@ -59,8 +58,8 @@ def get_existing_chunks(limit: int = None) -> list[dict]:
 
 
 async def import_chunks_to_lightrag(
-    chunk_ids: list[str] = None,
-    limit: int = None,
+    chunk_ids: Optional[list[str]] = None,
+    limit: Optional[int] = None,
 ) -> dict:
     """Импортировать существующие чанки в LightRAG.
 
@@ -75,8 +74,7 @@ async def import_chunks_to_lightrag(
     Returns:
         Статистика импорта
     """
-    from lightrag import LightRAG
-    from .lightrag_adapter import llm_model_func, embedding_func, create_lightrag_config
+    from .lightrag_adapter import create_lightrag_config
     from .main import get_lightrag
 
     rag = get_lightrag()
@@ -92,13 +90,15 @@ async def import_chunks_to_lightrag(
         chunks = []
         engine = _get_engine()
         with engine.connect() as conn:
-            placeholders = ", ".join([f"'{cid}'" for cid in chunk_ids])
             result = conn.execute(
-                text(f"""
+                text(
+                    """
                 SELECT c.id, c.text, c.title, c.source_url, c.source_type
                 FROM chunks c
-                WHERE c.id::text IN ({placeholders})
-            """)
+                WHERE c.id::text = ANY(:chunk_ids)
+            """
+                ),
+                {"chunk_ids": chunk_ids},
             )
             for row in result:
                 chunks.append(

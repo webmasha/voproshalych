@@ -6,6 +6,7 @@ import asyncio
 
 
 def main():
+    """Запустить standalone LightRAG-запрос и вернуть JSON результат."""
     if len(sys.argv) < 3:
         print(json.dumps({"error": "Usage: python script.py <question> <working_dir>"}))
         sys.exit(1)
@@ -19,7 +20,6 @@ def main():
 
     from lightrag import LightRAG, QueryParam
     from lightrag.utils import EmbeddingFunc
-    import numpy as np
 
     async def embedding_func(texts):
         from sentence_transformers import SentenceTransformer
