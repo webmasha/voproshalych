@@ -11,199 +11,222 @@
 ```mermaid
 sequenceDiagram
     autonumber
-    par Платформа (Telegram/VK/MAX)
-        participant User as Пользователь
-        participant Platform as Платформа<br/>(Telegram/VK/MAX API)
-        participant Adapter as Platform Adapter<br/>(bots/*/bot.py)
-        participant CoreClient as CoreClient<br/>(httpx)
-    end
-
-    par Bot-Core
-        participant Core as bot-core<br/>(FastAPI)
-        participant BotService as BotService<br/>(core/services/<br/>bot_service.py)
-        participant UserService as UserService<br/>(core/services/<br/>user_service.py)
-        participant QAClient as QAServiceClient<br/>(core/services/<br/>qa_service_client.py)
-    end
-
-    par QA-Service
-        participant QA as qa-service<br/>(FastAPI)
-        participant Embedding as Embedding<br/>(kb/embedding.py<br/>deepvk/USER-bge-m3)
-        participant Search as Search<br/>(kb/search.py<br/>pgvector)
-        participant BuildCtx as BuildContext<br/>(kb/search.py)
-        participant LLMPool as LLM Pool<br/>(llm/pool.py)
-    end
-
-    par База данных
-        participant DB_Postgres as PostgreSQL<br/>(+ pgvector)
-    end
-
-    par Внешние LLM
-        participant Mistral as Mistral AI<br/>(API)
-        participant GigaChat as GigaChat<br/>(API)
-        participant OpenRouter as OpenRouter<br/>(API)
-    end
-
-    par Ответ пользователю
-        participant PlatformOut as Platform API
-        participant UserResult as Пользователь
-    end
+    
+    participant User as Пользователь
+    participant Platform as Платформа<br/>(Telegram/VK/MAX API)
+    participant Adapter as Platform Adapter<br/>(bots/telegram/bot.py)
+    participant CoreClient as CoreClient<br/>(httpx)
+    participant Core as bot-core<br/>(FastAPI)
+    participant BotService as BotService<br/>(services/bot_service.py)
+    participant UserService as UserService<br/>(services/user_service.py)
+    participant QAClient as QAServiceClient<br/>(services/qa_service_client.py)
+    participant QA as qa-service<br/>(FastAPI)
+    participant LightRAG as LightRAG<br/>(lightrag.py)
+    participant Embedding as Embedding<br/>(kb/embedding.py)
+    participant PGVector as PGVectorStorage<br/>(vectors)
+    participant PGGraph as PGGraphStorage<br/>(knowledge graph)
+    participant ClassicSearch as Classic Search<br/>(kb/search.py)
+    participant LLMPool as LLM Pool<br/>(llm/pool.py)
+    participant Mistral as Mistral<br/>(API)
+    participant GigaChat as GigaChat<br/>(API)
+    participant OpenRouter as OpenRouter<br/>(API)
+    participant DB_Postgres as PostgreSQL<br/>(pgvector + AGE)
+    participant PlatformOut as Platform API
+    participant UserResult as Пользователь
 
     %% ЭТАП 1: Отправка вопроса
-    Note over User,Platform: ЭТАП 1: Пользователь отправляет вопрос
+    Note over User,Platform: === ЭТАП 1: Пользователь отправляет вопрос ===
     User->>Platform: 1. Текстовый вопрос<br/>("Какие правила приёма в магистратуру?")
     Platform->>Adapter: 2. Событие Message
 
-    %% ЭТАП 2: Normalize в адаптере
-    Note over Adapter,CoreClient: ЭТАП 2: Нормализация сообщения
-    Adapter->>Adapter: 3. detect_message_type()<br/>(определяет тип: text/voice/sticker...)
-    Adapter->>Adapter: 4. _build_payload()<br/>(формирует IncomingMessage)
-    Adapter->>CoreClient: 5. POST /messages<br/>(IncomingMessage: platform, user_id, chat_id, text, message_type)
+    %% ЭТАП 2: Нормализация
+    Note over Adapter,CoreClient: === ЭТАП 2: Нормализация и отправка в Bot-Core ===
+    Adapter->>Adapter: 3. detect_message_type()<br/>(text/voice/sticker/photo...)
+    Adapter->>Adapter: 4. _build_payload() → IncomingMessage
+    rect dashed
+        Note over Adapter: IncomingMessage JSON:<br/>{platform, user_id, chat_id,<br/>text, message_type, metadata}
+    end
+    Adapter->>CoreClient: 5. POST /messages (json payload)
+    CoreClient->>Core: 6. HTTP POST /messages
 
-    %% ЭТАП 3: Bot-Core обработка
-    Note over Core,BotService: ЭТАП 3: Приём и маршрутизация в Bot-Core
-    Core->>Core: 6. POST /messages endpoint<br/>(принимает JSON)
-    Core->>BotService: 7. handle_message(IncomingMessage)
+    %% ЭТАП 3: Bot-Core приём
+    Note over Core,BotService: === ЭТАП 3: Приём и маршрутизация ===
+    Core->>Core: 7. POST /messages endpoint<br/>(FastAPI route)
+    Core->>BotService: 8. handle_message(IncomingMessage)
 
-    %% ЭТАП 4: UserService - upsert пользователя
-    Note over BotService,DB_Postgres: ЭТАП 4: Работа с пользователем
-    BotService->>UserService: 8. upsert_user(message)
-    UserService->>DB_Postgres: 9. SELECT FROM users<br/>(WHERE platform=? AND platform_user_id=?)
-    DB_Postgres-->>UserService: 10. Результат (существующий user или None)
-    alt Пользователь не найден
-        UserService->>DB_Postgres: 11. INSERT INTO users<br/>(platform, platform_user_id, metadata)
+    %% ЭТАП 4: UserService - upsert
+    Note over BotService,DB_Postgres: === ЭТАП 4: Работа с пользователем ===
+    BotService->>UserService: 9. upsert_user(message)
+    UserService->>DB_Postgres: 10. SELECT * FROM users<br/>WHERE platform=? AND platform_user_id=?
+
+    alt Пользователь НЕ найден
+        DB_Postgres-->>UserService: 11. None
+        UserService->>DB_Postgres: 12. INSERT INTO users (...)
+        DB_Postgres-->>UserService: 13. COMMIT + user.id
     else Пользователь найден
-        UserService->>DB_Postgres: 12. UPDATE users<br/>(username, first_name, last_name)
+        DB_Postgres-->>UserService: 14. User object
+        UserService->>DB_Postgres: 15. UPDATE users SET ...<br/>(username, first_name, last_name)
+        DB_Postgres-->>UserService: 16. COMMIT
     end
-    DB_Postgres-->>UserService: 13. Commit + user object
-    UserService-->>BotService: 14. User object
+    UserService-->>BotService: 17. User object
 
-    %% ЭТАП 5: Маршрутизация по типу сообщения
-    Note over BotService,QAClient: ЭТАП 5: Маршрутизация текстового сообщения
-    BotService->>BotService: 15. Проверка message_type
+    %% ЭТАП 5: Маршрутизация по типу
+    Note over BotService,QAClient: === ЭТАП 5: Маршрутизация текстового сообщения ===
+    BotService->>BotService: 18. Проверка message_type
+    
     alt message_type == "text"
-        BotService->>BotService: 16. _handle_text_message()
-        BotService->>BotService: 17. normalize_text = text.strip().lower()
+        BotService->>BotService: 19. _handle_text_message()
+        BotService->>BotService: 20. normalize_text = text.strip().lower()
+        
         alt normalize_text == "/start"
-            BotService->>BotService: 18. _build_start_response()<br/>(формирует приветствие + кнопки)
+            BotService->>BotService: 21. _build_start_response()<br/>(приветствие + кнопки)
         else normalize_text == "/ping"
-            BotService->>BotService: 19. reply_text = "pong"
-        else Любой другой текст
-            BotService->>QAClient: 20. ask(question)
+            BotService->>BotService: 22. reply_text = "pong"
+        else ЛЮБОЙ текст → QA
+            BotService->>QAClient: 23. ask(question)
         end
+        
     else message_type == "voice"
-        BotService->>BotService: 21. _handle_voice_message()<br/>(заглушка "Скоро будет STT")
+        BotService->>BotService: 24. _handle_voice_message()<br/>(заглушка)
     else Другой тип
-        BotService->>BotService: 22. _build_unsupported_message_response()
+        BotService->>BotService: 25. _build_unsupported_message_response()
     end
 
-    %% ЭТАП 6: QAServiceClient с retry
-    Note over QAClient,QA: ЭТАП 6: Отправка в QA-Service (с retry логикой)
-    loop Retry (max 3 попытки, exponential backoff)
-        QAClient->>QA: 23. POST /qa<br/>({question: "текст вопроса"})
-        alt Успешный ответ (200)
-            QA-->>QAClient: 24. {answer: "...", model: "...", sources: [...]}
+    %% ЭТАП 6: QAServiceClient → QA (с retry)
+    Note over QAClient,QA: === ЭТАП 6: Отправка в QA-Service (retry логика) ===
+    loop Retry (max 3, backoff: 1→2→4→8s)
+        QAClient->>QA: 26. POST /qa {question: "..."}
+        
+        alt Успех (200)
+            QA-->>QAClient: 27. {answer, model, sources}
         else Ошибка (503/500/429/timeout)
-            QA--xQAClient: 25. Ошибка HTTP
-            QAClient->>QAClient: 26. time.sleep(backoff)<br/>(backoff *= 2, max 8s)
+            QA--xQAClient: 28. HTTP Error
+            QAClient->>QAClient: 29. time.sleep(backoff)<br/>(exponential backoff)
         end
     end
 
-    %% ЭТАП 7: QA-Service обработка вопроса
-    Note over QA,Embedding: ЭТАП 7: Приём вопроса в QA-Service
-    QA->>QA: 27. ask_question(QARequest)
-    QA->>QA: 28. llm_pool.select_model()<br/>(выбирает доступный провайдер)
-    QA->>QA: 29. provider_name = "mistral" (по умолчанию)
-
-    %% ЭТАП 8: Генерация эмбеддинга
-    Note over Embedding,DB_Postgres: ЭТАП 8: Генерация эмбеддинга
-    QA->>Embedding: 30. get_embedding(question)
-    Embedding->>Embedding: 31. model.encode(text)<br/>(deepvk/USER-bge-m3, normalize=True)
-    Embedding-->>QA: 32. embedding = [0.123, 0.456, ...] (1024 float)
-
-    %% ЭТАП 9: Векторный поиск
-    Note over Search,DB_Postgres: ЭТАП 9: Векторный поиск в базе знаний
-    QA->>Search: 33. search_chunks(embedding, top_k=3)
-    Search->>DB_Postgres: 34. SQL: SELECT ... FROM chunks c<br/>JOIN embeddings e ON c.id = e.chunk_id<br/>WHERE e.embedding_vector IS NOT NULL<br/>ORDER BY e.embedding_vector <=> :embedding<br/>LIMIT 3
-    DB_Postgres-->>Search: 35. Top-3 чанка<br/>(id, text, title, source_url, similarity)
-    Search-->>QA: 36. chunks = [{id, text, title, source_url, similarity}, ...]
-
-    %% ЭТАП 10: Построение контекста
-    Note over BuildCtx,LLMPool: ЭТАП 10: Построение контекста для LLM
-    alt chunks найдены
-        QA->>BuildCtx: 37. build_context_from_chunks(chunks)
-        BuildCtx->>BuildCtx: 38. Формирует контекст:<br/>--- Документ 1 ---<br/>Источник: ...<br/>Название: ...<br/>Содержание: ...
-        BuildCtx-->>QA: 39. context = "--- Документ 1 ---\nИсточник: ..."
-    else chunks не найдены
-        QA->>QA: 40. context = "" (пустой)
+    %% ЭТАП 7: QA-Service → LightRAG (primary) или Classic RAG (fallback)
+    Note over QA,LightRAG: === ЭТАП 7: QA-Service обработка (LightRAG → Fallback) ===
+    QA->>QA: 30. ask_question(QARequest)
+    QA->>QA: 31. USE_LIGHT_RAG = os.getenv("USE_LIGHT_RAG")
+    
+    alt USE_LIGHT_RAG == "true"
+        Note over QA,LightRAG: --- Попытка LightRAG (timeout 20s) ---
+        QA->>LightRAG: 32. aquery(question, param=QueryParam(mode="mix"))
+        
+        rect dashed
+            Note over LightRAG: LightRAG Query Flow:<br/>1. Keyword extraction<br/>2. Vector search (PGVector)<br/>3. Graph search (PGGraph)<br/>4. Full-text search<br/>5. Merge results (ranked)
+        end
+        
+        LightRAG->>Embedding: 33. embedding_func(question)<br/>(deepvk/USER-bge-m3)
+        Embedding->>LightRAG: 34. 1024-dim vector
+        
+        LightRAG->>PGVector: 35. similarity_search(vector, top_k)
+        PGVector->>DB_Postgres: 36. SELECT ... ORDER BY vector <=> query
+        DB_Postgres-->>PGVector: 37. Top-K chunks (text, source_url)
+        PGVector-->>LightRAG: 38. vector_results
+        
+        LightRAG->>PGGraph: 39. graph_lookup(keywords)
+        PGGraph->>DB_Postgres: 40. MATCH (n)-[r]->(m)<br/>WHERE n.name IN keywords
+        DB_Postgres-->>PGGraph: 41. Graph entities + relations
+        PGGraph-->>LightRAG: 42. graph_results
+        
+        LightRAG->>LightRAG: 43. merge_and_rank(<br/>vector_results,<br/>graph_results)
+        LightRAG->>LLMPool: 44. llm_model_func(prompt + context)
+        
+        alt LightRAG успех (< 20s)
+            LLMPool-->>LightRAG: 45. LLMResponse (content)
+            LightRAG-->>QA: 46. answer_text
+            
+        else LightRAG timeout или ошибка
+            LightRAG--xQA: 47. TimeoutError / Exception
+            Note over QA,ClassicSearch: --- Fallback: Classic RAG (timeout 15s) ---
+            
+            QA->>ClassicSearch: 48. get_embedding(question)
+            ClassicSearch->>Embedding: 49. model.encode(text)
+            Embedding->>ClassicSearch: 50. embedding = [0.123, ...]
+            
+            ClassicSearch->>DB_Postgres: 51. SELECT ... FROM chunks c<br/>JOIN embeddings e ON c.id = e.chunk_id<br/>ORDER BY e.embedding_vector <=> :embedding<br/>LIMIT 3
+            DB_Postgres-->>ClassicSearch: 52. Top-3 chunks
+            ClassicSearch-->>QA: 53. chunks = [{text, title, source_url}, ...]
+            
+            QA->>QA: 54. build_context_from_chunks(chunks)
+            QA->>QA: 55. prompt = SYSTEM_PROMPT_WITH_CONTEXT<br/>+ context + question
+            
+            QA->>LLMPool: 56. llm_pool.call(prompt)
+        end
+        
+    else USE_LIGHT_RAG != "true"
+        Note over QA,ClassicSearch: --- Classic RAG only ---
+        QA->>ClassicSearch: 57. get_embedding(question)
+        ClassicSearch->>DB_Postgres: 58. Vector search (top_k=3)
+        DB_Postgres-->>ClassicSearch: 59. chunks
+        ClassicSearch-->>QA: 60. chunks
+        QA->>QA: 61. build_context_from_chunks(chunks)
+        QA->>LLMPool: 62. llm_pool.call(prompt)
     end
 
-    %% ЭТАП 11: Сборка промпта
-    Note over QA,LLMPool: ЭТАП 11: Сборка и отправка промпта в LLM
-    QA->>QA: 41. Формирование финального промпта
-    alt context существует
-        QA->>QA: 42. prompt = SYSTEM_PROMPT_WITH_CONTEXT<br/>+ "Контекст из документов ТюмГУ:"<br/>+ context<br/>+ "Вопрос: " + question
-    else context пустой
-        QA->>QA: 43. prompt = SYSTEM_PROMPT<br/>+ "Вопрос: " + question
-    end
-
-    QA->>LLMPool: 44. llm_pool.call(prompt)
-
-    %% ЭТАП 12: LLM Pool fallback
-    Note over LLMPool,Mistral: ЭТАП 12: LLM Pool с fallback логикой
+    %% ЭТАП 8: LLM Pool
+    Note over LLMPool,OpenRouter: === ЭТАП 8: LLM Pool (fallback: mistral → gigachat → openrouter) ===
     loop По приоритету: mistral → gigachat → openrouter
-        LLMPool->>LLMPool: 45. get_available_providers()
-        LLMPool->>LLMPool: 46. Проверка доступности провайдеров
+        LLMPool->>LLMPool: 63. select_model()
+        LLMPool->>LLMPool: 64. get_available_providers()
+        
         alt Mistral доступен
-            LLMPool->>Mistral: 47. POST /v1/chat/completions<br/>(prompt, temperature, max_tokens)
-            Mistral-->>LLMPool: 48. {choices: [{message: {content: "..."}}], usage: {...}}
+            LLMPool->>Mistral: 65. POST /v1/chat/completions
+            Mistral-->>LLMPool: 66. {choices: [{message: {content: "..."}}]}
         else Mistral недоступен
-            LLMPool->>GigaChat: 49. POST /llm/v1/chat/completions
-            GigaChat-->>LLMPool: 50. Response JSON
+            alt GigaChat доступен
+                LLMPool->>GigaChat: 67. POST /llm/v1/chat/completions
+                GigaChat-->>LLMPool: 68. Response JSON
+            else GigaChat недоступен
+                LLMPool->>OpenRouter: 69. POST /v1/chat/completions
+                OpenRouter-->>LLMPool: 70. Response JSON
+            end
         end
     end
+    
+    LLMPool-->>QA: 71. LLMResponse(content, model, usage)
 
-    LLMPool-->>QA: 51. LLMResponse<br/>(content, model, usage)
-
-    %% ЭТАП 13: Формирование ответа
-    Note over QA,QAClient: ЭТАП 13: Формирование QAResponse
-    QA->>QA: 52. Формирование QAResponse
+    %% ЭТАП 9: Формирование QAResponse
+    Note over QA,QAClient: === ЭТАП 9: Формирование ответа ===
+    QA->>QA: 72. Формирование QAResponse
     alt chunks найдены
-        QA->>QA: 53. sources = [c.source_url for c in chunks]
+        QA->>QA: 73. sources = [c.source_url for c in chunks]
     else
-        QA->>QA: 54. sources = []
+        QA->>QA: 74. sources = []
     end
-    QA-->>QAClient: 55. QAResponse<br/>(answer, model, sources)
+    QA-->>QAClient: 75. QAResponse {answer, model, sources}
 
-    %% ЭТАП 14: Возврат ответа в Bot-Service
-    Note over QAClient,BotService: ЭТАП 14: Возврат ответа в Bot-Service
-    QAClient-->>BotService: 56. reply_text = answer
+    %% ЭТАП 10: Возврат в Bot-Service
+    Note over QAClient,BotService: === ЭТАП 10: Возврат ответа ===
+    QAClient-->>BotService: 76. reply_text = answer
 
-    %% ЭТАП 15: Формирование BotResponse
-    Note over BotService,PlatformOut: ЭТАП 15: Формирование BotResponse
-    BotService->>BotService: 57. _build_feedback_buttons()<br/>(["👍", "👎"])
-    BotService->>BotService: 58. BotResponse(actions=[<br/>OutgoingAction(send_text, reply_text, buttons)<br/>])
+    %% ЭТАП 11: BotResponse
+    Note over BotService,PlatformOut: === ЭТАП 11: Формирование BotResponse ===
+    BotService->>BotService: 77. _build_feedback_buttons()<br/>(["👍", "👎"])
+    BotService->>BotService: 78. BotResponse(actions=[<br/>OutgoingAction(send_text, text, buttons)<br/>])
 
-    %% ЭТАП 16: Отправка ответа на платформу
-    Note over PlatformOut,UserResult: ЭТАП 16: Доставка ответа пользователю
-    BotService->>Core: 59. BotResponse JSON
-    Core-->>Adapter: 60. Response JSON
-    Adapter->>Adapter: 61. build_inline_keyboard(buttons)
-    Adapter->>PlatformOut: 62. sendMessage(text, reply_markup)
-    PlatformOut-->>UserResult: 63. Доставляет сообщение с кнопками
+    %% ЭТАП 12: Отправка на платформу
+    Note over PlatformOut,UserResult: === ЭТАП 12: Доставка ответа пользователю ===
+    BotService->>Core: 79. BotResponse JSON
+    Core-->>Adapter: 80. Response JSON
+    Adapter->>Adapter: 81. build_inline_keyboard(buttons)
+    Adapter->>PlatformOut: 82. sendMessage(text, reply_markup)
+    PlatformOut-->>UserResult: 83. Пользователь получает ответ<br/>с кнопками 👍/👎
 
     %% Альтернативные пути
-    %% Команда /start
     alt normalize_text == "/start"
-        BotService->>BotService: 64. _build_start_buttons(is_subscribed)<br/>(["Начать новый диалог"], ["Подписаться/Отписаться"])
+        BotService->>BotService: 84. _build_start_buttons(is_subscribed)
     end
 
-    %% Обработка ошибок QA-Service
+    %% Обработка ошибок
     alt Ошибка QAServiceTimeout
-        BotService->>BotService: 65. Возвращает: "Поиск ответа занимает дольше обычного..."
+        BotService->>BotService: 85. "Поиск ответа занимает дольше обычного..."
     else Ошибка QAServiceUnavailable
-        BotService->>BotService: 66. Возвращает: "Сервис временно недоступен..."
+        BotService->>BotService: 86. "Сервис временно недоступен..."
     else Ошибка QAServiceError
-        BotService->>BotService: 67. Возвращает: "Не удалось сформировать ответ..."
+        BotService->>BotService: 87. "Не удалось сформировать ответ..."
     end
 ```
 
@@ -426,51 +449,60 @@ class QAServiceClient:
 
 #### ЭТАП 6: Обработка вопроса в QA-Service (QA API)
 
-**Участники:** QA FastAPI → Embedding → Search → LLM Pool
+**Участники:** QA FastAPI → LightRAG → Embedding → PGVector/PGGraph → LLM Pool
 
 **Описание:**
-QA-service получает вопрос, выполняет векторный поиск и генерирует ответ через LLM.
+QA-service получает вопрос и использует **LightRAG** как primary метод с fallback на **Classic RAG**.
 
 **Реализация (`api/routes/qa.py`):**
 ```python
 @router.post("", response_model=QAResponse)
 async def ask_question(request: QARequest) -> QAResponse:
-    llm_pool = get_llm_pool()
-    
-    provider_name = llm_pool.select_model()
-    if not provider_name:
-        raise HTTPException(status_code=503, detail="No available LLM providers")
+    """Основной endpoint: LightRAG (primary) + Classic RAG (fallback)."""
+    use_lightrag = True  # Можно управлять через USE_LIGHT_RAG env var
 
-    try:
-        context = ""
-        sources: list[str] = []
+    if use_lightrag:
+        try:
+            # Попытка LightRAG (timeout: 20s)
+            result = await asyncio.wait_for(
+                _query_lightrag(request.question),
+                timeout=LIGHTRAG_TIMEOUT_SECONDS
+            )
+            return result
+        except (asyncio.TimeoutError, Exception) as e:
+            # Fallback на Classic RAG (timeout: 15s)
+            return await asyncio.wait_for(
+                _query_classic_rag(request.question),
+                timeout=CLASSIC_RAG_TIMEOUT_SECONDS
+            )
+```
 
-        # Векторный поиск
-        query_embedding = get_embedding(request.question)
-        chunks = await search_chunks(
-            query=request.question,
-            embedding=query_embedding,
-            top_k=3,  # Топ-3 чанка (не 5 как в документации!)
-        )
-        
-        if chunks:
-            context = build_context_from_chunks(chunks)
-            sources = [c["source_url"] for c in chunks if c.get("source_url")]
+**Конфигурация:**
 
-        # Сборка промпта
-        if context:
-            prompt = f"{SYSTEM_PROMPT_WITH_CONTEXT}\n\nКонтекст из документов ТюмГУ:\n{context}\n\nВопрос: {request.question}"
-        else:
-            prompt = f"{SYSTEM_PROMPT}\n\nВопрос: {request.question}"
+| Параметр | Значение | Описание |
+|----------|----------|----------|
+| LIGHTRAG_TIMEOUT_SECONDS | 20 | Timeout для LightRAG |
+| CLASSIC_RAG_TIMEOUT_SECONDS | 15 | Timeout для Classic RAG fallback |
 
-        # Вызов LLM
-        response = await llm_pool.call(prompt=prompt)
+**LightRAG Query Flow:**
 
-        return QAResponse(
-            answer=response.content,
-            model=response.model,
-            sources=sources,
-        )
+1. **Keyword extraction** - извлечение ключевых слов из вопроса
+2. **Vector search** - поиск в PGVectorStorage (embedding similarity)
+3. **Graph search** - поиск в PGGraphStorage (relations между сущностями)
+4. **Full-text search** - дополнительный текстовый поиск
+5. **Merge & Rank** - объединение и ранжирование результатов
+6. **LLM generation** - генерация ответа через LLM Pool
+
+**Storage:**
+
+- **PGVectorStorage**: Хранение векторов (chunk_id → embedding)
+- **PGGraphStorage**: Хранение графа знаний (entities + relations) - требует Apache AGE
+- Fallback: **NetworkXStorage** если PGGraph недоступен
+
+**Fallback логика:**
+
+```
+LightRAG (20s) → [timeout/error] → Classic RAG (15s) → [timeout/error] → Error Response
 ```
 
 **Результат:**
@@ -727,13 +759,19 @@ def _build_feedback_buttons(self) -> list[list[InlineButton]]:
 
 | Компонент | В коде | В документации |
 |-----------|--------|----------------|
-| `/qa/categorize` endpoint | ❌ Нет | ✅ Есть |
-| Категоризация вопроса (greeting/kb_query/clarification) | ❌ Нет | ✅ Есть |
-| Session/History management | ❌ Нет | ✅ Есть |
-| Логирование вопросов-ответов в БД | ❌ Нет | ✅ Есть |
-| Feedback обработка (like/dislike) | ⚠️ Кнопки есть, обработка нет | ✅ Есть |
-| top_k для поиска | 3 | 5 |
-| STT для голосовых | ⚠️ Заглушка | ✅ Описано |
+| LightRAG (primary) | ✅ Есть | ✅ Обновлено |
+| Classic RAG (fallback) | ✅ Есть | ✅ Обновлено |
+| `/qa` endpoint | ✅ LightRAG + fallback | ✅ Обновлено |
+| `/qa/lightrag` endpoint | ✅ Есть | ✅ Обновлено |
+| `/qa/classic` endpoint | ✅ Есть | ✅ Обновлено |
+| Knowledge Graph (PGGraphStorage) | ✅ Есть | ✅ Обновлено |
+| `/qa/categorize` endpoint | ❌ Нет | ❌ Устарело |
+| Категоризация вопроса (greeting/kb_query/clarification) | ❌ Нет | ❌ Устарело |
+| Session/History management | ❌ Нет | ❌ Устарело |
+| Логирование вопросов-ответов в БД | ❌ Нет | ❌ Устарело |
+| Feedback обработка (like/dislike) | ⚠️ Кнопки есть, обработка нет | ⚠️ Частично |
+| top_k для поиска | 3 | ✅ 3 |
+| STT для голосовых | ⚠️ Заглушка | ⚠️ Заглушка |
 
 ---
 
@@ -763,9 +801,16 @@ def _build_feedback_buttons(self) -> list[list[InlineButton]]:
 
 | Метод | Путь | Назначение |
 |-------|------|------------|
-| POST | /qa | Основной endpoint для вопросов |
+| POST | /qa | **LightRAG (primary) + Classic RAG (fallback)** |
+| POST | /qa/lightrag | Только LightRAG |
+| POST | /qa/classic | Только Classic RAG |
 | GET | /health | Проверка здоровья |
-| GET | /kb/chunks | Просмотр чанков (для админки) |
+| GET | /kb/chunks | Просмотр чанков |
+| GET | /kb/chunks/count | Количество чанков |
+| POST | /kb/import-to-lightrag | Импорт чанков в LightRAG |
+| POST | /kb/rebuild-knowledge-graph | Перестроение графа знаний |
+| GET | /kb/index-status | Статус индекса LightRAG |
+| GET | /kb/index-versions | История версий индекса |
 
 ---
 
@@ -774,11 +819,15 @@ def _build_feedback_buttons(self) -> list[list[InlineButton]]:
 | Компонент | Технология |
 |-----------|------------|
 | Backend | Python 3.12, FastAPI |
-| Bot Framework | aiogram 3.x |
-| Database | PostgreSQL + pgvector |
+| Bot Framework | aiogram 3.x (Telegram), vkbottle (VK) |
+| Database | PostgreSQL 18 + pgvector + Apache AGE |
 | Embeddings | deepvk/USER-bge-m3 (1024 dimensions) |
-| LLM Pool | Mistral, GigaChat, OpenRouter |
+| RAG | LightRAG (Hybrid: vector + graph + fulltext) + Classic RAG fallback |
+| LLM Pool | Mistral → GigaChat → OpenRouter |
+| Vector Storage | PGVectorStorage (PostgreSQL) |
+| Graph Storage | PGGraphStorage (Apache AGE) / NetworkXStorage (fallback) |
 | Containerization | Docker, Docker Compose |
+| Docker Image | dawsonlp/postgres-batteries-inc |
 
 ---
 
@@ -795,18 +844,21 @@ def _build_feedback_buttons(self) -> list[list[InlineButton]]:
 50ms     | UserService     | upsert_user() → users table
 60ms     | BotService      | _handle_text_message()
 70ms     | QAServiceClient | POST /qa → qa-service (с retry)
-80ms     | QA API          | ask_question()
-90ms     | Embedding       | get_embedding() → 1024-vector
-100ms    | Search          | search_chunks() → Top-3 чанка
-110ms    | BuildContext    | build_context_from_chunks()
-120ms    | LLM Pool        | select_model() → Mistral
-130ms    | Mistral API     | POST /chat/completions
-150ms    | Mistral API     | response JSON
-160ms    | QA Service      | Формирует QAResponse
-170ms    | QAServiceClient | Возвращает answer
-180ms    | BotService      | Формирует BotResponse
-190ms    | Telegram Adapter| sendMessage с кнопками
-200ms    | Пользователь    | Получает ответ
+80ms     | QA API          | ask_question() → LightRAG
+90ms     | LightRAG        | aquery(question, mode="mix")
+100ms    | Embedding       | get_embedding() → 1024-vector
+110ms    | PGVector        | Vector search (top_k)
+120ms    | PGGraph         | Graph search (entities + relations)
+130ms    | LightRAG        | merge_and_rank(results)
+140ms    | LLM Pool        | select_model() → Mistral
+160ms    | Mistral API     | response JSON
+170ms    | QA Service      | Формирует QAResponse
+180ms    | QAServiceClient | Возвращает answer
+190ms    | BotService      | Формирует BotResponse
+200ms    | Telegram Adapter| sendMessage с кнопками
+210ms    | Пользователь    | Получает ответ
+
+Примечание: При LightRAG timeout/error → fallback на Classic RAG (+15s)
 ```
 
 ---
@@ -862,8 +914,10 @@ async def lifespan(app: FastAPI):
 | Компонент | Технология |
 |-----------|------------|
 | Backend | Python 3.12, FastAPI |
-| Bot Framework | aiogram 3.x |
-| Database | PostgreSQL + pgvector |
+| Bot Framework | aiogram 3.x (Telegram), vkbottle (VK) |
+| Database | PostgreSQL 18 + pgvector + Apache AGE |
 | Embeddings | deepvk/USER-bge-m3 (1024 dimensions) |
-| LLM Pool | Mistral, GigaChat, OpenRouter |
+| RAG | LightRAG (Hybrid) + Classic RAG fallback |
+| LLM Pool | Mistral → GigaChat → OpenRouter |
 | Containerization | Docker, Docker Compose |
+| Docker Image | dawsonlp/postgres-batteries-inc |
