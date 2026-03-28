@@ -1,4 +1,22 @@
-"""Alembic environment configuration."""
+"""Конфигурация окружения Alembic для миграций базы данных.
+
+Содержит настройки Alembic для выполнения миграций в онлайн и офлайн режимах.
+Загружает модели SQLAlchemy для автогенерации миграций.
+
+Режимы работы:
+- Offline: миграции выполняются без подключения к БД (только SQL скрипты)
+- Online: миграции выполняются через подключение к БД
+
+Основные функции:
+- run_migrations_offline(): Офлайн режим
+- run_migrations_online(): Онлайн режим (используется по умолчанию)
+
+Пример выполнения миграций:
+    alembic upgrade head        # Применить все миграции
+    alembic downgrade -1        # Откатить последнюю
+    alembic current            # Показать текущую версию
+    alembic history            # Показать историю миграций
+"""
 
 from logging.config import fileConfig
 
@@ -27,7 +45,21 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode."""
+    """Выполнить миграции в офлайн режиме.
+
+    В офлайн режиме Alembic генерирует SQL скрипты,
+    но не выполняет их. Используется для:
+    - Предварительного просмотра изменений
+    - Ручного выполнения миграций
+    - Работы без подключения к БД
+
+    Args:
+        None
+
+    Note:
+        Офлайн режим активируется флагом --sql:
+            alembic upgrade head --sql
+    """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -41,7 +73,25 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
+    """Выполнить миграции в онлайн режиме.
+
+    В онлайн режиме Alembic напрямую выполняет миграции
+    в базе данных через SQLAlchemy движок.
+    Это основной режим работы при развёртывании.
+
+    Процесс:
+    1. Создать подключение к БД
+    2. Настроить контекст Alembic
+    3. Выполнить все pending миграции
+    4. Записать версию в alembic_version
+
+    Args:
+        None
+
+    Note:
+        Используется по умолчанию при команде:
+            alembic upgrade head
+    """
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

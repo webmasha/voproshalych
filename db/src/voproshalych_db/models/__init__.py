@@ -1,4 +1,26 @@
-"""Database models for Voproshalych."""
+"""Модели базы данных Voproshalych.
+
+Содержит все SQLAlchemy модели для таблиц базы данных.
+Импортируется в migration/env.py для автогенерации миграций.
+
+Таблицы:
+- User: Пользователи платформ (Telegram, VK, MAX)
+- Session: Сессии пользователей
+- Message: Сообщения в чате
+- QuestionAnswer: Пары вопрос-ответ
+- Chunk: Чанки базы знаний
+- Embedding: Векторные представления чанков
+- Subscription: История подписок на рассылку
+- Holiday: Праздники для рассылки
+- TelemetryLog: Логи телеметрии
+- AgentTrace: Трассировки агента
+
+Пример использования:
+    from voproshalych_db.models import User
+
+    # Запрос к БД:
+    user = db.query(User).filter(User.id == 1).first()
+"""
 
 from sqlalchemy import (
     Column,
@@ -18,7 +40,22 @@ from voproshalych_db.models.base import Base
 
 
 class User(Base):
-    """Пользователь платформы."""
+    """Модель пользователя платформы.
+
+    Представляет пользователя одной из платформ (Telegram, VK, MAX).
+    Уникальность определяется парой (platform, platform_user_id).
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        platform: Название платформы (telegram, vk, max)
+        platform_user_id: ID пользователя на платформе
+        username: Username в Telegram/VK
+        first_name: Имя пользователя
+        last_name: Фамилия пользователя
+        is_subscribed: Флаг подписки на рассылку
+        created_at: Дата создания записи
+        updated_at: Дата последнего обновления
+    """
 
     __tablename__ = "users"
 
@@ -41,7 +78,18 @@ class User(Base):
 
 
 class Session(Base):
-    """Сессия пользователя."""
+    """Модель сессии пользователя.
+
+    Сессия представляет отдельный диалог пользователя с ботом.
+    Используется для контекста и истории сообщений.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        user_id: Ссылка на пользователя
+        state: Состояние диалога (START, DIALOG, WAITING_ANSWER)
+        started_at: Дата начала сессии
+        last_message_at: Дата последнего сообщения
+    """
 
     __tablename__ = "sessions"
 
@@ -55,7 +103,19 @@ class Session(Base):
 
 
 class Message(Base):
-    """Сообщение в чате."""
+    """Модель сообщения в чате.
+
+    Представляет отдельное сообщение (вопрос или ответ) в сессии.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        session_id: Ссылка на сессию
+        role: Роль отправителя (user, assistant)
+        content: Текст сообщения
+        model_used: Модель LLM, которая сгенерировала ответ
+        used_chunk_ids: ID чанков, использованных для ответа
+        created_at: Дата создания сообщения
+    """
 
     __tablename__ = "messages"
 
@@ -71,7 +131,17 @@ class Message(Base):
 
 
 class QuestionAnswer(Base):
-    """Пара вопрос-ответ."""
+    """Модель пары вопрос-ответ.
+
+    Связывает вопрос пользователя и ответ бота.
+    Позволяет анализировать качество ответов.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        question_id: Ссылка на сообщение-вопрос
+        answer_id: Ссылка на сообщение-ответ
+        created_at: Дата создания записи
+    """
 
     __tablename__ = "questions_answers"
 
@@ -82,7 +152,20 @@ class QuestionAnswer(Base):
 
 
 class Chunk(Base):
-    """Чанк базы знаний."""
+    """Модель чанка базы знаний.
+
+    Представляет фрагмент документа из базы знаний ТюмГУ.
+    Используется для семантического поиска.
+
+    Атрибуты:
+        id: UUID идентификатор чанка
+        text: Текстовое содержание чанка
+        source_url: URL источника документа
+        source_type: Тип источника (web, pdf, confluence)
+        title: Название документа
+        created_at: Дата создания
+        updated_at: Дата последнего обновления
+    """
 
     __tablename__ = "chunks"
 
@@ -100,7 +183,17 @@ class Chunk(Base):
 
 
 class Embedding(Base):
-    """Вектор эмбеддинга."""
+    """Модель векторного представления чанка.
+
+    Хранит эмбеддинг (вектор) для семантического поиска.
+    Связан с чанком через внешний ключ.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        chunk_id: Ссылка на чанк
+        embedding: Вектор (хранится как текст/JSON)
+        created_at: Дата создания
+    """
 
     __tablename__ = "embeddings"
 
@@ -116,7 +209,16 @@ class Embedding(Base):
 
 
 class Subscription(Base):
-    """Подписка на рассылку."""
+    """Модель подписки на рассылку.
+
+    Хранит историю подписок пользователя на рассылку.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        user_id: Ссылка на пользователя
+        subscribed_at: Дата подписки
+        unsubscribed_at: Дата отписки (NULL если активна)
+    """
 
     __tablename__ = "subscriptions"
 
@@ -129,7 +231,21 @@ class Subscription(Base):
 
 
 class Holiday(Base):
-    """Праздник."""
+    """Модель праздника.
+
+    Хранит праздники для рассылки поздравлений.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        name: Название праздника
+        date: Конкретная дата (для разовых)
+        month: Месяц (для повторяющихся)
+        day_of_month: День месяца (для повторяющихся)
+        type: Тип праздника
+        male_holiday: Мужской праздник
+        female_holiday: Женский праздник
+        template_prompt: Шаблон промпта для LLM
+    """
 
     __tablename__ = "holidays"
 
@@ -145,7 +261,18 @@ class Holiday(Base):
 
 
 class TelemetryLog(Base):
-    """Логи телеметрии."""
+    """Модель лога телеметрии.
+
+    Хранит логи для отладки и мониторинга.
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        timestamp: Время события
+        level: Уровень логирования (INFO, WARNING, ERROR)
+        request_id: ID запроса для трассировки
+        service: Имя сервиса
+        payload: JSON данные
+    """
 
     __tablename__ = "telemetry_logs"
 
@@ -158,7 +285,21 @@ class TelemetryLog(Base):
 
 
 class AgentTrace(Base):
-    """Трассировка агента."""
+    """Модель трассировки агента.
+
+    Хранит шаги работы агента (для отладки LLM агентов).
+
+    Атрибуты:
+        id: Уникальный идентификатор
+        request_id: ID запроса
+        step: Номер шага
+        phase: Фаза (reasoning, acting, evaluation)
+        thought: Мысль агента
+        action: Выполненное действие
+        action_input: Входные данные действия
+        observation: Результат действия
+        created_at: Время создания записи
+    """
 
     __tablename__ = "agent_traces"
 
