@@ -98,13 +98,51 @@ curl -X POST http://localhost:8004/qa -H "Content-Type: application/json" -d '{"
 
 ## Бэкап базы данных
 
-Экспорт:
+### Экспорт
+
+Создание дампа с командами DROP (для последующего чистого импорта):
 
 ```bash
-docker compose exec -T postgres pg_dump -U voproshalych -d voproshalych > voproshalych_db_$(date +%Y%m%d).sql
+docker compose exec -T postgres pg_dump -U voproshalych -d voproshalych --clean > voproshalych_db_$(date +%Y%m%d).sql
 ```
 
-Импорт:
+### Импорт
+
+**Вариант 1: База пустая или таблицы не нужны**
+
+```bash
+docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql
+```
+
+**Вариант 2: База уже содержит таблицы (создает ошибки "multiple primary keys")**
+
+Сначала очистите все таблицы в схеме public:
+
+```bash
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+```
+
+Затем импортируйте дамп:
+
+```bash
+docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql
+```
+
+**Вариант 3: Импорт в новую чистую базу**
+
+1. Удалите том Docker с базой данных:
+
+```bash
+docker compose down -v
+```
+
+2. Запустите контейнеры заново:
+
+```bash
+docker compose up -d postgres
+```
+
+3. Дождитесь готовности PostgreSQL (10-15 секунд), затем импортируйте:
 
 ```bash
 docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql

@@ -17,61 +17,129 @@
 
 ## Архитектура
 
-1. `bot-service` — платформенные адаптеры и `bot-core` с диалоговой логикой.
-2. `qa-service` — retrieval + generation, LLM pool, база знаний.
-3. `db` — миграции и схема данных.
-4. `postgres` + `pgvector` — хранение и векторный поиск.
+### Компоненты системы
+
+1. **postgres** — PostgreSQL 18 с расширениями pgvector (векторный поиск) и Apache AGE (графовый движок)
+2. **db-migrate** — миграции Alembic
+3. **qa-service** — Retrieval + Generation, LLM Pool, База Знаний, LightRAG
+4. **bot-core** — бизнес-логика диалогов
+5. **telegram-bot**, **vk-bot**, **max-bot** — адаптеры платформ
+
+### Tech Stack
+
+| Компонент | Технология |
+|-----------|-------------|
+| Backend | Python 3.12, FastAPI |
+| Database | PostgreSQL 18 + pgvector + Apache AGE |
+| Embeddings | deepvk/USER-bge-m3 (1024-dim) |
+| LLM Pool | Mistral → GigaChat → OpenRouter |
+| RAG | LightRAG (Hybrid Search + Knowledge Graph) |
+| Bot Frameworks | aiogram (Telegram), vkbottle (VK), aiohttp (MAX) |
+
+### Схема взаимодействия
+
+```
+Пользователь → Telegram/VK/MAX
+     ↓
+Bot-адаптер → bot-core (8000)
+     ↓
+QA-service (8004): LightRAG (primary) → Classic RAG (fallback)
+     ↓
+PostgreSQL (pgvector + AGE)
+```
 
 ## Быстрый запуск
 
 1. Копирование переменных окружения:
-
 ```bash
 cp .env.example .env
 ```
 
-2. Запуск всех сервисов (включая MAX-бот):
-
+2. Запуск всех сервисов:
 ```bash
 docker compose up -d --build
 ```
 
-3. Запуск сервисов без MAX-бота (если `MAX_BOT_TOKEN` не задан):
-
-```bash
-docker compose up -d --build postgres db-migrate qa-service bot-core telegram-bot vk-bot
-```
-
-4. Запуск только backend-контура без платформенных ботов:
-
-```bash
-docker compose up -d --build postgres db-migrate qa-service bot-core
-```
-
-## Полезные команды
-
-Проверка состояния:
-
+3. Проверка состояния:
 ```bash
 docker compose ps
 ```
 
-Проверка QA health:
+## Конфигурация LightRAG
+
+Основные переменные в `.env`:
 
 ```bash
-curl http://localhost:8004/health
+# LightRAG включен
+USE_LIGHT_RAG=true
+
+# Хранилище
+LIGHT_RAG_STORAGE_TYPE=PostgreSQL
+LIGHT_RAG_POSTGRES_URI=postgresql://voproshalych:voproshalych@postgres:5432/voproshalych
+
+# Модель эмбеддингов
+LIGHT_RAG_MODEL_NAME=deepvk-user-bge-m3
+
+# Использовать PostgreSQL для графа (требует Apache AGE)
+LIGHT_RAG_USE_PG_GRAPH=true
 ```
 
-Тест запроса к QA:
+## API Endpoints
 
+### QA
+
+| Endpoint | Описание |
+|----------|----------|
+| `POST /qa` | Основной endpoint с LightRAG + fallback на classic RAG |
+| `POST /qa/lightrag` | Только LightRAG |
+| `POST /qa/classic` | Только Classic RAG |
+
+### База Знаний
+
+| Endpoint | Описание |
+|----------|----------|
+| `POST /kb/documents` | Добавить документ в базу знаний |
+| `POST /kb/import-to-lightrag` | Импортировать чанки в LightRAG + создать граф |
+| `POST /kb/rebuild-knowledge-graph` | Перестроить граф знаний |
+| `GET /kb/index-status` | Статус текущего индекса |
+| `GET /kb/index-versions` | История версий индекса |
+| `GET /kb/chunks/count` | Количество чанков |
+
+### Health
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health` | Health check всех сервисов |
+
+## Полезные команды
+
+### Тест QA с LightRAG
 ```bash
-curl -X POST http://localhost:8004/qa -H "Content-Type: application/json" -d '{"question":"Какие правила приема в магистратуру?"}'
+curl -X POST http://localhost:8004/qa \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Какие правила приема в магистратуру?"}'
+```
+
+### Импорт чанков в LightRAG
+```bash
+curl -X POST http://localhost:8004/kb/import-to-lightrag
+```
+
+### Статус индекса
+```bash
+curl http://localhost:8004/kb/index-status
+```
+
+### История версий
+```bash
+curl http://localhost:8004/kb/index-versions
 ```
 
 ## Документация
 
-- `docs/pipeline-user-query.md`
-- `docs/onboarding_guide.md`
-- `qa-service/docs/KB_FILL_GUIDE.md`
-- `qa-service/docs/testing.md`
-- `qa-service/docs/message-flow.md`
+- `docs/pipeline-user-query.md` — Пайплайн обработки запроса
+- `docs/onboarding_guide.md` — Гайд онбординга
+- `qa-service/docs/KB_FILL_GUIDE.md` — Заполнение базы знаний
+- `qa-service/docs/testing.md` — Тестирование
+- `qa-service/docs/knowledge_graph_guide.md` — Создание графа знаний
+- `qa-service/docs/message-flow.md` — Поток сообщений

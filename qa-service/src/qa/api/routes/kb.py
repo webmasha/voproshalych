@@ -4,6 +4,8 @@ import json
 import logging
 import uuid
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import create_engine, text
@@ -59,6 +61,15 @@ class DocumentResponse(BaseModel):
     url: str
     title: str
     chunks_count: int
+
+
+class ImportToLightRAGRequest(BaseModel):
+    """Запрос на импорт в LightRAG."""
+
+    chunk_ids: Optional[list[str]] = None
+    limit: Optional[int] = None
+    version_id: Optional[str] = None
+    notes: str = ""
 
 
 async def _save_chunk_to_db(chunk: Chunk, embedding: list[float]) -> None:
@@ -139,3 +150,116 @@ async def download_document(request: DocumentRequest) -> DocumentResponse:
 async def kb_health():
     """Проверка работоспособности KB сервиса."""
     return {"status": "ok", "embedding_model": get_kb_config().embedding_model}
+
+
+@router.post("/import-to-lightrag")
+async def import_to_lightrag(
+    version_id: Optional[str] = None,
+    notes: str = "",
+) -> dict:
+    """Импортировать чанки в LightRAG с версионированием.
+
+    Pipeline:
+    1. Создать версию индекса
+    2. Дедупликация по content_hash
+    3. Индексация в LightRAG
+    4. Извлечение сущностей и связей (Knowledge Graph)
+    """
+    import os
+
+    if os.getenv("USE_LIGHT_RAG", "false").lower() != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="LightRAG not enabled. Set USE_LIGHT_RAG=true in environment",
+        )
+
+    try:
+        from qa.lightrag_import import import_chunks_to_lightrag
+
+        result = await import_chunks_to_lightrag(
+            chunk_ids=None,
+            limit=None,
+            version_id=version_id,
+            notes=notes,
+        )
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Import to LightRAG failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+
+
+@router.post("/rebuild-knowledge-graph")
+async def rebuild_knowledge_graph(version_id: Optional[str] = None) -> dict:
+    """Перестроить Knowledge Graph (только граф, без переиндексации чанков)."""
+    import os
+
+    if os.getenv("USE_LIGHT_RAG", "false").lower() != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="LightRAG not enabled. Set USE_LIGHT_RAG=true in environment",
+        )
+
+    try:
+        from qa.lightrag_import import rebuild_knowledge_graph
+
+        result = await rebuild_knowledge_graph(version_id=version_id)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Knowledge graph rebuild failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Rebuild failed: {e}")
+    import os
+
+    if os.getenv("USE_LIGHT_RAG", "false").lower() != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="LightRAG not enabled. Set USE_LIGHT_RAG=true in environment",
+        )
+
+    try:
+        from qa.lightrag_import import rebuild_knowledge_graph
+
+        result = await rebuild_knowledge_graph(version_id=version_id)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Knowledge graph rebuild failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Rebuild failed: {e}")
+
+
+@router.get("/index-status")
+async def get_index_status() -> dict:
+    """Получить статус текущего индекса LightRAG."""
+    try:
+        from qa.lightrag_import import get_index_status
+
+        return get_index_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/index-versions")
+async def list_index_versions(limit: int = 10) -> dict:
+    """Список версий индекса."""
+    try:
+        from qa.lightrag_import import list_index_versions
+
+        return {"versions": list_index_versions(limit=limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chunks/count")
+async def get_chunks_count() -> dict:
+    """Получить количество чанков в Базе Знаний."""
+    engine = get_engine()
+
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM chunks"))
+        count = result.scalar()
+
+    return {"count": count}

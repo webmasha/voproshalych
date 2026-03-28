@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: dawsonlp/postgres-batteries-inc:latest
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
@@ -9,12 +9,12 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U voproshalych"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   db-migrate:
     build:

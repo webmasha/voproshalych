@@ -62,4 +62,6 @@ def create_lightrag_config() -> dict:
             "postgresql://voproshalych:voproshalych@postgres:5432/voproshalych",
         ),
         "embedding_dimension": 1024,
+        "model_name": os.getenv("LIGHT_RAG_MODEL_NAME", "deepvk-user-bge-m3"),
+        "use_pg_graph": os.getenv("LIGHT_RAG_USE_PG_GRAPH", "true").lower() == "true",
     }

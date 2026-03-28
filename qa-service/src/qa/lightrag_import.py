@@ -1,6 +1,9 @@
-"""Функции для интеграции существующей Базы Знаний с LightRAG."""
+"""Bridge: импорт чанков из chunks/embeddings в LightRAG с версионированием."""
 
+import hashlib
 import logging
+import uuid
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import create_engine, text
@@ -8,6 +11,31 @@ from sqlalchemy import create_engine, text
 logger = logging.getLogger(__name__)
 
 _engine = None
+
+LIGHTRAG_VERSION_TABLE = """
+CREATE TABLE IF NOT EXISTS lightrag_index_versions (
+    version_id VARCHAR(50) PRIMARY KEY,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMP,
+    model_name VARCHAR(100),
+    chunks_processed INTEGER DEFAULT 0,
+    chunks_skipped INTEGER DEFAULT 0,
+    chunks_failed INTEGER DEFAULT 0,
+    error_log TEXT,
+    notes TEXT
+);
+"""
+
+LIGHTRAG_DOC_TABLE = """
+CREATE TABLE IF NOT EXISTS lightrag_doc_registry (
+    chunk_id VARCHAR(50) PRIMARY KEY,
+    content_hash VARCHAR(64) NOT NULL,
+    last_indexed_version VARCHAR(50),
+    last_indexed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+);
+"""
 
 
 def _get_engine():
@@ -18,15 +46,98 @@ def _get_engine():
     return _engine
 
 
+def _ensure_tables():
+    """Создать таблицы версионирования если не существуют."""
+    engine = _get_engine()
+    with engine.connect() as conn:
+        conn.execute(text(LIGHTRAG_VERSION_TABLE))
+        conn.execute(text(LIGHTRAG_DOC_TABLE))
+        conn.commit()
+    logger.info("Ensured lightrag versioning tables exist")
+
+
+def _compute_hash(text: str) -> str:
+    """Вычислить SHA256 хеш текста."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _create_version(version_id: Optional[str] = None, notes: str = "") -> str:
+    """Создать новую версию индекса."""
+    engine = _get_engine()
+    vid = (
+        version_id
+        or f"v-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    )
+
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO lightrag_index_versions (version_id, status, notes)
+                VALUES (:vid, 'running', :notes)
+                ON CONFLICT (version_id) DO NOTHING
+            """),
+            {"vid": vid, "notes": notes},
+        )
+        conn.commit()
+
+    logger.info(f"Created index version: {vid}")
+    return vid
+
+
+def _update_version(
+    version_id: str,
+    status: str,
+    processed: int = 0,
+    skipped: int = 0,
+    failed: int = 0,
+    error_log: str = "",
+):
+    """Обновить статус версии индекса."""
+    engine = _get_engine()
+
+    with engine.connect() as conn:
+        if status in ("completed", "failed"):
+            conn.execute(
+                text("""
+                    UPDATE lightrag_index_versions 
+                    SET status = :status, 
+                        finished_at = NOW(),
+                        chunks_processed = :processed,
+                        chunks_skipped = :skipped,
+                        chunks_failed = :failed,
+                        error_log = :error_log
+                    WHERE version_id = :vid
+                """),
+                {
+                    "status": status,
+                    "processed": processed,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "error_log": error_log[:5000] if error_log else None,
+                    "vid": version_id,
+                },
+            )
+        else:
+            conn.execute(
+                text("""
+                    UPDATE lightrag_index_versions 
+                    SET chunks_processed = :processed,
+                        chunks_skipped = :skipped,
+                        chunks_failed = :failed
+                    WHERE version_id = :vid
+                """),
+                {
+                    "processed": processed,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "vid": version_id,
+                },
+            )
+        conn.commit()
+
+
 def get_existing_chunks(limit: Optional[int] = None) -> list[dict]:
-    """Получить все существующие чанки из БД.
-
-    Args:
-        limit: Лимит количества чанков (None = все)
-
-    Returns:
-        Список чанков с текстом и метаданными
-    """
+    """Получить чанки из БД."""
     engine = _get_engine()
 
     query = """
@@ -60,45 +171,39 @@ def get_existing_chunks(limit: Optional[int] = None) -> list[dict]:
 async def import_chunks_to_lightrag(
     chunk_ids: Optional[list[str]] = None,
     limit: Optional[int] = None,
+    version_id: Optional[str] = None,
+    notes: str = "",
 ) -> dict:
-    """Импортировать существующие чанки в LightRAG.
-
-    Извлекает чанки из текущей БД и добавляет их в индекс LightRAG.
-    При добавлении LightRAG автоматически создаёт эмбеддинги и извлекает
-    сущности для knowledge graph.
-
-    Args:
-        chunk_ids: Список ID чанков для импорта (None = все)
-        limit: Лимит количества чанков
-
-    Returns:
-        Статистика импорта
-    """
+    """Импортировать чанки в LightRAG с версионированием и дедупликацией."""
     from .lightrag_adapter import create_lightrag_config
-    from .main import get_lightrag
+    from .main import get_lightrag, is_lightrag_ready
+
+    _ensure_tables()
+
+    if not is_lightrag_ready():
+        raise RuntimeError(
+            "LightRAG not initialized or not ready. Set USE_LIGHT_RAG=true"
+        )
 
     rag = get_lightrag()
-
-    if rag is None:
-        raise RuntimeError("LightRAG not initialized. Set USE_LIGHT_RAG=true")
-
     config = create_lightrag_config()
+    model_name = config.get("model_name", "default")
 
-    logger.info("Starting import of existing chunks to LightRAG...")
+    vid = _create_version(version_id, notes)
+
+    logger.info(f"Starting import for version {vid}...")
 
     if chunk_ids:
         chunks = []
         engine = _get_engine()
         with engine.connect() as conn:
+            placeholders = ", ".join([f"'{cid}'" for cid in chunk_ids])
             result = conn.execute(
-                text(
-                    """
+                text(f"""
                 SELECT c.id, c.text, c.title, c.source_url, c.source_type
                 FROM chunks c
-                WHERE c.id::text = ANY(:chunk_ids)
-            """
-                ),
-                {"chunk_ids": chunk_ids},
+                WHERE c.id::text IN ({placeholders})
+            """)
             )
             for row in result:
                 chunks.append(
@@ -114,59 +219,162 @@ async def import_chunks_to_lightrag(
         chunks = get_existing_chunks(limit=limit)
 
     if not chunks:
-        return {"status": "no_chunks", "imported": 0}
+        _update_version(vid, "completed", 0, 0, 0)
+        return {"status": "no_chunks", "imported": 0, "version_id": vid}
 
     documents = {}
-    for chunk in chunks:
-        doc_id = chunk["id"]
-        content = f"{chunk['title']}\n\n{chunk['text']}"
-        documents[doc_id] = content
+    processed = 0
+    skipped = 0
+    failed = 0
+    error_messages = []
+
+    engine = _get_engine()
+
+    with engine.connect() as conn:
+        for chunk in chunks:
+            chunk_id = chunk["id"]
+            content = f"{chunk['title']}\n\n{chunk['text']}"
+            content_hash = _compute_hash(content)
+
+            existing = conn.execute(
+                text(
+                    "SELECT content_hash, last_indexed_version FROM lightrag_doc_registry WHERE chunk_id = :cid"
+                ),
+                {"cid": chunk_id},
+            ).fetchone()
+
+            if existing and existing[0] == content_hash:
+                skipped += 1
+                continue
+
+            documents[chunk_id] = content
+            processed += 1
 
     try:
-        await rag.ainsert(documents)
+        if documents:
+            await rag.ainsert(documents)
 
-        logger.info(f"Successfully imported {len(documents)} chunks to LightRAG")
+            with engine.connect() as conn:
+                for chunk_id, content in documents.items():
+                    content_hash = _compute_hash(content)
+                    conn.execute(
+                        text("""
+                            INSERT INTO lightrag_doc_registry (chunk_id, content_hash, last_indexed_version, status)
+                            VALUES (:cid, :hash, :vid, 'indexed')
+                            ON CONFLICT (chunk_id) DO UPDATE SET
+                                content_hash = EXCLUDED.content_hash,
+                                last_indexed_version = EXCLUDED.last_indexed_version,
+                                last_indexed_at = NOW(),
+                                status = 'indexed'
+                        """),
+                        {"cid": chunk_id, "hash": content_hash, "vid": vid},
+                    )
+                conn.commit()
+
+        _update_version(vid, "completed", processed, skipped, failed)
+
+        logger.info(
+            f"Import completed: {processed} processed, {skipped} skipped, {failed} failed"
+        )
 
         return {
             "status": "success",
-            "imported": len(documents),
-            "message": f"Imported {len(documents)} chunks. "
-            f"Knowledge graph will be built automatically.",
+            "version_id": vid,
+            "imported": processed,
+            "skipped": skipped,
+            "failed": failed,
+            "message": f"Indexed {processed} chunks. Skipped {skipped} (unchanged).",
         }
 
     except Exception as e:
-        logger.error(f"Failed to import chunks to LightRAG: {e}")
+        error_msg = str(e)[:2000]
+        error_messages.append(error_msg)
+        _update_version(vid, "failed", processed, skipped, failed, error_msg)
+        logger.error(f"Import failed: {e}")
         raise RuntimeError(f"Import failed: {e}")
 
 
-async def rebuild_knowledge_graph() -> dict:
-    """Перестроить knowledge graph из всех документов.
+async def rebuild_knowledge_graph(version_id: Optional[str] = None) -> dict:
+    """Перестроить knowledge graph."""
+    from .main import get_lightrag, is_lightrag_ready
 
-    Использует LLM для извлечения сущностей и связей из всех
-    документов в индексе LightRAG.
-
-    Returns:
-        Статистика перестроения
-    """
-    from .main import get_lightrag
-
-    rag = get_lightrag()
-
-    if rag is None:
+    if not is_lightrag_ready():
         raise RuntimeError("LightRAG not initialized. Set USE_LIGHT_RAG=true")
 
-    logger.info("Starting knowledge graph rebuild...")
+    rag = get_lightrag()
+    vid = version_id or f"kg-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    logger.info(f"Starting knowledge graph extraction for version {vid}...")
 
     try:
         await rag.aextract_entities()
 
-        logger.info("Knowledge graph rebuilt successfully")
+        logger.info("Knowledge graph built successfully")
 
         return {
             "status": "success",
-            "message": "Knowledge graph rebuilt successfully",
+            "version_id": vid,
+            "message": "Knowledge graph built successfully",
         }
 
     except Exception as e:
-        logger.error(f"Failed to rebuild knowledge graph: {e}")
-        raise RuntimeError(f"Rebuild failed: {e}")
+        logger.error(f"Knowledge graph build failed: {e}")
+        raise RuntimeError(f"KG build failed: {e}")
+
+
+def get_index_status() -> dict:
+    """Получить статус текущего индекса."""
+    engine = _get_engine()
+
+    with engine.connect() as conn:
+        latest = conn.execute(
+            text(
+                "SELECT * FROM lightrag_index_versions ORDER BY created_at DESC LIMIT 1"
+            )
+        ).fetchone()
+
+        if not latest:
+            return {"status": "no_index", "message": "No index version found"}
+
+        return {
+            "version_id": latest[0],
+            "status": latest[1],
+            "created_at": str(latest[2]),
+            "finished_at": str(latest[3]) if latest[3] else None,
+            "model_name": latest[4],
+            "chunks_processed": latest[5],
+            "chunks_skipped": latest[6],
+            "chunks_failed": latest[7],
+            "error_log": latest[8],
+            "notes": latest[9],
+        }
+
+
+def list_index_versions(limit: int = 10) -> list[dict]:
+    """Список версий индекса."""
+    engine = _get_engine()
+
+    with engine.connect() as conn:
+        results = conn.execute(
+            text(
+                "SELECT * FROM lightrag_index_versions ORDER BY created_at DESC LIMIT :lim"
+            ),
+            {"lim": limit},
+        ).fetchall()
+
+        versions = []
+        for row in results:
+            versions.append(
+                {
+                    "version_id": row[0],
+                    "status": row[1],
+                    "created_at": str(row[2]),
+                    "finished_at": str(row[3]) if row[3] else None,
+                    "model_name": row[4],
+                    "chunks_processed": row[5],
+                    "chunks_skipped": row[6],
+                    "chunks_failed": row[7],
+                }
+            )
+
+        return versions

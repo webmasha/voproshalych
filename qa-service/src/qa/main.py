@@ -6,10 +6,11 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 
-from .api import qa_router, health_router
+from .api import qa_router, health_router, kb_router
 from .kb.embedding import get_embedding_model
 from .llm import get_llm_pool
 
@@ -20,22 +21,25 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-_lightrag = None
+_lightrag: Optional["LightRAG"] = None
+_lightrag_ready: bool = False
 
 
 def get_lightrag():
-    """Получить экземпляр LightRAG.
-
-    Returns:
-        Экземпляр LightRAG или None если не инициализирован
-    """
+    """Получить экземпляр LightRAG."""
     global _lightrag
     return _lightrag
 
 
+def is_lightrag_ready() -> bool:
+    """Проверить, инициализирован ли LightRAG."""
+    global _lightrag_ready
+    return _lightrag_ready
+
+
 async def init_lightrag():
-    """Инициализировать LightRAG."""
-    global _lightrag
+    """Инициализировать LightRAG с PGGraphStorage и PGVectorStorage."""
+    global _lightrag, _lightrag_ready
 
     try:
         from lightrag import LightRAG
@@ -51,6 +55,14 @@ async def init_lightrag():
         logger.info(f"Initializing LightRAG with config: {config}")
 
         embedding_dimension = config.get("embedding_dimension", 1024)
+        model_name = config.get("model_name", "default")
+
+        storage_type = config.get("storage_type", "PostgreSQL")
+
+        # Determine graph storage based on available extensions
+        # PGGraphStorage requires Apache AGE extension (dawsonlp/postgres-batteries-inc)
+        # NetworkXStorage is fallback when AGE is not available
+        use_pg_graph = config.get("use_pg_graph", True)
 
         _lightrag = LightRAG(
             working_dir=config["working_dir"],
@@ -59,21 +71,22 @@ async def init_lightrag():
                 embedding_dim=embedding_dimension,
                 max_token_size=512,
                 func=_embedding_func,
+                model_name=model_name,
             ),
-            graph_storage="NetworkXStorage",
-            vector_storage="PGVectorStorage"
-            if config["storage_type"] == "PostgreSQL"
-            else None,
+            graph_storage="PGGraphStorage" if use_pg_graph else "NetworkXStorage",
+            vector_storage="PGVectorStorage" if storage_type == "PostgreSQL" else None,
         )
 
-        if config["storage_type"] == "PostgreSQL":
+        if storage_type == "PostgreSQL":
             await _lightrag.initialize_storages()
 
-        logger.info("LightRAG initialized successfully")
+        _lightrag_ready = True
+        logger.info("LightRAG initialized successfully with PostgreSQL storage")
 
     except Exception as e:
         logger.error(f"Failed to initialize LightRAG: {e}")
         _lightrag = None
+        _lightrag_ready = False
 
 
 @asynccontextmanager
@@ -108,20 +121,17 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    """Создать и настроить приложение FastAPI.
-
-    Returns:
-        Настроенное приложение FastAPI
-    """
+    """Создать и настроить приложение FastAPI."""
     app = FastAPI(
         title="QA Service",
-        description="QA Service with LLM Pool and LightRAG",
+        description="QA Service with LLM Pool, LightRAG and Classic RAG",
         version="0.1.0",
         lifespan=lifespan,
     )
 
     app.include_router(health_router)
     app.include_router(qa_router)
+    app.include_router(kb_router)
 
     return app
 
